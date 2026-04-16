@@ -11,7 +11,7 @@ let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (e) {}
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // ============================================================
 //  CONFIGURACIÓN
@@ -22,16 +22,18 @@ const CREDENTIALS_PATH = path.join(
 );
 const TOKEN_PATH  = path.join(__dirname, 'token.json');
 const CONFIG_PATH = path.join(__dirname, 'config.json');
-const REDIRECT_URI = `http://localhost:${PORT}/auth/callback`;
+// En producción (Railway) usar REDIRECT_URI como variable de entorno
+const REDIRECT_URI = process.env.REDIRECT_URI || `http://localhost:${PORT}/auth/callback`;
 
 // Config persistente (API keys, etc.)
 let appConfig = {};
 try { appConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch (e) {}
 function saveConfig() {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(appConfig, null, 2));
+  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(appConfig, null, 2)); } catch (e) {}
 }
 function getGroqKey() {
-  return appConfig.groqApiKey || process.env.GROQ_API_KEY || '';
+  // Prioridad: variable de entorno (Railway) > config.json (local)
+  return process.env.GROQ_API_KEY || appConfig.groqApiKey || '';
 }
 
 // Modelo Groq con visión — se puede cambiar desde la UI
@@ -53,7 +55,14 @@ const SCOPES = [
 // ============================================================
 //  GOOGLE AUTH
 // ============================================================
-const credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH)).installed;
+// Las credenciales se pueden pasar como variable de entorno (Railway/Vercel)
+// o como archivo local (desarrollo)
+let credentials;
+if (process.env.GOOGLE_CREDENTIALS) {
+  credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS).installed;
+} else {
+  credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH)).installed;
+}
 const oauth2Client = new google.auth.OAuth2(
   credentials.client_id,
   credentials.client_secret,
@@ -368,11 +377,23 @@ async function downloadDriveFile(fileId) {
 
   const meta = await drive.files.get({
     fileId,
-    fields: 'name,mimeType',
+    // owners y lastModifyingUser nos dan el nombre real del alumno
+    fields: 'name,mimeType,owners,lastModifyingUser,modifiedTime',
     supportsAllDrives: true,
   });
 
   let { name, mimeType } = meta.data;
+
+  // Intentar obtener nombre real del propietario del archivo
+  const ownerName =
+    meta.data.owners?.[0]?.displayName ||
+    meta.data.lastModifyingUser?.displayName ||
+    null;
+  const ownerEmail =
+    meta.data.owners?.[0]?.emailAddress ||
+    meta.data.lastModifyingUser?.emailAddress ||
+    null;
+
   let buffer;
 
   const EXPORT_AS_PDF = [
@@ -399,7 +420,12 @@ async function downloadDriveFile(fileId) {
   // Normalizar tipo MIME para imágenes HEIC
   if (mimeType === 'image/heic' || mimeType === 'image/heif') mimeType = 'image/jpeg';
 
-  return { name, mimeType, buffer };
+  return { name, mimeType, buffer, ownerName, ownerEmail };
+}
+
+/** Decide si un nombre de alumno es genérico (placeholder) */
+function isGenericName(name) {
+  return !name || /^alumno_?\d*/i.test(name.trim());
 }
 
 // ============================================================
@@ -782,6 +808,16 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
             });
             const file = await downloadDriveFile(df.id);
             studentFiles.push(file);
+
+            // ── Nombre real desde el propietario del archivo ──
+            // Si el nombre del alumno es genérico (no se obtuvo del roster),
+            // usamos el nombre del propietario del archivo en Drive.
+            if (isGenericName(sub.studentName) && file.ownerName) {
+              const prev = sub.studentName;
+              sub.studentName = file.ownerName;
+              if (file.ownerEmail && !sub.studentEmail) sub.studentEmail = file.ownerEmail;
+              console.log(`Nombre actualizado: "${prev}" → "${sub.studentName}"`);
+            }
           } catch (e) {
             send('warning', {
               student: sub.studentName,
@@ -798,7 +834,7 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
           current: i + 1,
           total: toCorrect.length,
           student: sub.studentName,
-          message: `Corrigiendo a ${sub.studentName} con Gemini IA…`,
+          message: `Corrigiendo a ${sub.studentName} con Groq IA…`,
         });
 
         // Llamar a Gemini (con callback de reintentos para actualizar el frontend)
