@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: corrector-ia
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GROQ_API_KEY
+        sync: false          # se rellena manualmente en Render
+      - key: REDIRECT_URI
+        sync: false          # https://TU-APP.onrender.com/auth/callback
+      - key: GOOGLE_CREDENTIALS
+        sync: false          # contenido completo del client_secret_*.json
+      - key: GOOGLE_TOKEN
+        sync: false          # se rellena después del primer login

@@ -71,6 +71,13 @@ const oauth2Client = new google.auth.OAuth2(
 
 function loadToken() {
   try {
+    // 1. Variable de entorno GOOGLE_TOKEN (Render / producción)
+    if (process.env.GOOGLE_TOKEN) {
+      const token = JSON.parse(process.env.GOOGLE_TOKEN);
+      oauth2Client.setCredentials(token);
+      return true;
+    }
+    // 2. Archivo local (desarrollo)
     if (fs.existsSync(TOKEN_PATH)) {
       const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
       oauth2Client.setCredentials(token);
@@ -84,9 +91,13 @@ loadToken();
 // Guardar tokens renovados automáticamente
 oauth2Client.on('tokens', (tokens) => {
   try {
-    let saved = {};
-    if (fs.existsSync(TOKEN_PATH)) saved = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify({ ...saved, ...tokens }));
+    // Fusionar con los credenciales actuales para preservar refresh_token
+    const current = oauth2Client.credentials || {};
+    const merged = { ...current, ...tokens };
+    // Guardar en disco (desarrollo)
+    fs.writeFileSync(TOKEN_PATH, JSON.stringify(merged));
+    // Exponer el token actualizado para que el usuario lo copie a Render
+    appConfig._latestToken = JSON.stringify(merged);
   } catch (e) {}
 });
 
@@ -109,6 +120,15 @@ app.get('/auth/status', (req, res) => {
   const creds = oauth2Client.credentials;
   const authenticated = !!(creds && creds.access_token);
   res.json({ authenticated, email: creds?.email || null, name: creds?.name || null });
+});
+
+// Devuelve el token actual para pegarlo en la variable GOOGLE_TOKEN de Render
+app.get('/auth/token-export', (req, res) => {
+  const creds = oauth2Client.credentials;
+  if (!creds || !creds.access_token) {
+    return res.status(401).json({ error: 'No autenticado' });
+  }
+  res.json({ token: JSON.stringify(creds) });
 });
 
 app.get('/auth/login', (req, res) => {
@@ -134,7 +154,9 @@ app.get('/auth/callback', async (req, res) => {
       tokens.name = info.data.name;
     } catch (e) {}
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
-    res.redirect('/?auth=success');
+    // En producción, redirigir a la página de exportar token
+    const isProd = process.env.NODE_ENV === 'production';
+    res.redirect(isProd ? '/?auth=success&showtoken=1' : '/?auth=success');
   } catch (err) {
     console.error('OAuth callback error:', err.message);
     res.redirect(`/?auth=error&msg=${encodeURIComponent(err.message)}`);
