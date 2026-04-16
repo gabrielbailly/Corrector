@@ -58,10 +58,15 @@ const SCOPES = [
 // Las credenciales se pueden pasar como variable de entorno (Railway/Vercel)
 // o como archivo local (desarrollo)
 let credentials;
+function parseCredentials(raw) {
+  const parsed = JSON.parse(raw);
+  // Soporta tanto cliente "web" (Render) como "installed" (escritorio local)
+  return parsed.web || parsed.installed;
+}
 if (process.env.GOOGLE_CREDENTIALS) {
-  credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS).installed;
+  credentials = parseCredentials(process.env.GOOGLE_CREDENTIALS);
 } else {
-  credentials = JSON.parse(fs.readFileSync(CREDENTIALS_PATH)).installed;
+  credentials = parseCredentials(fs.readFileSync(CREDENTIALS_PATH, 'utf8'));
 }
 const oauth2Client = new google.auth.OAuth2(
   credentials.client_id,
