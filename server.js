@@ -37,7 +37,8 @@ function getGroqKey() {
 }
 
 // Modelo Groq con visión — se puede cambiar desde la UI
-const GROQ_MODEL_DEFAULT = 'meta-llama/llama-4-scout-17b-16e-instruct';
+// llama-3.2-11b tiene cuota mucho más generosa en Groq free tier (14.400 req/día)
+const GROQ_MODEL_DEFAULT = 'llama-3.2-11b-vision-preview';
 function getGroqModel() {
   return appConfig.groqModel || GROQ_MODEL_DEFAULT;
 }
@@ -545,8 +546,16 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
     const status = err.response?.status;
 
     if (status === 429 && attempt <= MAX_ATTEMPTS) {
-      const retryAfter = err.response?.headers?.['retry-after'];
-      const waitSec = retryAfter ? parseInt(retryAfter) : 10 * attempt;
+      const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0');
+      // Si Groq pide esperar más de 60s es que la cuota diaria está agotada → error inmediato
+      if (retryAfter > 60) {
+        const minutosReset = Math.ceil(retryAfter / 60);
+        throw new Error(
+          `Cuota diaria de Groq agotada. Reinicia en ~${minutosReset} min, ` +
+          `o cambia el modelo en ⚙️ Ajustes a "llama-3.2-11b-vision-preview".`
+        );
+      }
+      const waitSec = retryAfter > 0 ? retryAfter : 10 * attempt;
       console.log(`Groq 429 — reintento ${attempt}/${MAX_ATTEMPTS} en ${waitSec}s`);
       if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
       await sleep(waitSec * 1000);
