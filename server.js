@@ -9,6 +9,8 @@ const multer = require('multer');
 const archiver = require('archiver');
 let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (e) {}
+let sharp;
+try { sharp = require('sharp'); } catch (e) { console.warn('sharp no disponible — imágenes sin comprimir'); }
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,8 +39,8 @@ function getGroqKey() {
 }
 
 // Modelo Groq con visión — se puede cambiar desde la UI
-// llama-3.2-11b tiene cuota mucho más generosa en Groq free tier (14.400 req/día)
-const GROQ_MODEL_DEFAULT = 'llama-3.2-11b-vision-preview';
+// Único modelo de visión disponible en Groq actualmente
+const GROQ_MODEL_DEFAULT = 'meta-llama/llama-4-scout-17b-16e-instruct';
 function getGroqModel() {
   return appConfig.groqModel || GROQ_MODEL_DEFAULT;
 }
@@ -473,6 +475,28 @@ async function extractPdfText(buffer) {
   }
 }
 
+/**
+ * Comprime una imagen para que quepa dentro del límite de Groq (4 MB en base64).
+ * Redimensiona a máx 1200 px y calidad 82. Sin sharp devuelve el buffer original.
+ */
+async function compressImage(buffer, mimeType) {
+  if (!sharp) return { buffer, mimeType };
+  try {
+    const sizeMB = buffer.length / 1024 / 1024;
+    // Solo comprimir si pasa de 1 MB
+    if (sizeMB <= 1) return { buffer, mimeType };
+    const compressed = await sharp(buffer)
+      .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    console.log(`Imagen comprimida: ${sizeMB.toFixed(1)} MB → ${(compressed.length/1024/1024).toFixed(1)} MB`);
+    return { buffer: compressed, mimeType: 'image/jpeg' };
+  } catch (e) {
+    console.warn('Error comprimiendo imagen:', e.message);
+    return { buffer, mimeType };
+  }
+}
+
 async function callGroq(prompt, files, attempt = 1, onRetry = null) {
   const MAX_ATTEMPTS = 4;
   const groqKey = getGroqKey();
@@ -482,15 +506,17 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
   const content = [{ type: 'text', text: prompt }];
 
   for (const file of files) {
-    const sizeMB = file.buffer.length / 1024 / 1024;
-
     if (file.mimeType.startsWith('image/')) {
-      if (sizeMB > 20) {
-        console.warn(`Imagen muy grande (${sizeMB.toFixed(1)}MB), puede fallar: ${file.name}`);
+      // Comprimir antes de enviar (límite Groq: 4 MB en base64)
+      const { buffer: imgBuf, mimeType: imgMime } = await compressImage(file.buffer, file.mimeType);
+      const b64SizeMB = (imgBuf.length * 4 / 3) / 1024 / 1024;
+      if (b64SizeMB > 4) {
+        console.warn(`Imagen aún grande tras compresión (${b64SizeMB.toFixed(1)} MB base64), omitiendo: ${file.name}`);
+        continue; // Groq rechaza imágenes base64 > 4 MB
       }
       content.push({
         type: 'image_url',
-        image_url: { url: `data:${file.mimeType};base64,${file.buffer.toString('base64')}` },
+        image_url: { url: `data:${imgMime};base64,${imgBuf.toString('base64')}` },
       });
     } else if (file.mimeType === 'application/pdf') {
       // Intentar extraer texto del PDF
