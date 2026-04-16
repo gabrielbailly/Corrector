@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corrector IA — Google Classroom</title>
+<style>
+/* ========== RESET & BASE ========== */
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --blue:#2563eb;--blue-dark:#1d4ed8;--blue-light:#eff6ff;
+  --green:#16a34a;--green-light:#f0fdf4;
+  --amber:#d97706;--amber-light:#fff7ed;
+  --red:#dc2626;--red-light:#fef2f2;
+  --gray:#64748b;--bg:#f1f5f9;--card:#fff;
+  --border:#e2e8f0;--text:#1e293b;--text-muted:#64748b;
+  --radius:.875rem;--radius-sm:.5rem;
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
+input,textarea,select,button{font-family:inherit}
+a{color:var(--blue);text-decoration:none}
+
+/* ========== HEADER ========== */
+.top-bar{background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);color:#fff;padding:0 1.5rem;height:64px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.logo{display:flex;align-items:center;gap:.75rem;font-weight:700;font-size:1.1rem}
+.logo-icon{width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:.5rem;display:flex;align-items:center;justify-content:center;font-size:1.2rem}
+.user-pill{display:flex;align-items:center;gap:.6rem;background:rgba(255,255,255,.15);padding:.35rem .75rem .35rem .5rem;border-radius:2rem;font-size:.85rem;cursor:pointer;border:1px solid rgba(255,255,255,.25);transition:background .2s}
+.user-pill:hover{background:rgba(255,255,255,.25)}
+.user-avatar{width:26px;height:26px;background:rgba(255,255,255,.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700}
+
+/* ========== LAYOUT ========== */
+.page{max-width:860px;margin:0 auto;padding:2rem 1rem 4rem}
+.hero{text-align:center;padding:2.5rem 0 1.5rem}
+.hero h2{font-size:1.75rem;font-weight:800;color:var(--text);margin-bottom:.5rem}
+.hero p{color:var(--text-muted);font-size:1rem;max-width:520px;margin:0 auto}
+
+/* ========== STEPPER ========== */
+.steps{display:flex;justify-content:center;gap:0;margin-bottom:2.5rem;position:relative}
+.steps::before{content:'';position:absolute;top:18px;left:calc(50% - 160px);width:320px;height:2px;background:var(--border)}
+.step-dot{display:flex;flex-direction:column;align-items:center;gap:.4rem;position:relative;z-index:1;min-width:80px}
+.dot{width:36px;height:36px;border-radius:50%;background:var(--border);color:var(--text-muted);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;transition:all .3s;border:2px solid var(--border)}
+.dot-label{font-size:.7rem;color:var(--text-muted);text-align:center;font-weight:500;transition:color .3s}
+.step-dot.active .dot{background:var(--blue);color:#fff;border-color:var(--blue);box-shadow:0 0 0 4px rgba(37,99,235,.2)}
+.step-dot.active .dot-label{color:var(--blue);font-weight:700}
+.step-dot.done .dot{background:var(--green);color:#fff;border-color:var(--green)}
+.step-dot.done .dot-label{color:var(--green)}
+
+/* ========== CARDS ========== */
+.card{background:var(--card);border-radius:var(--radius);padding:1.75rem;box-shadow:var(--shadow);margin-bottom:1.5rem;border:1px solid transparent;transition:border-color .2s}
+.card.active-card{border-color:var(--blue)}
+.card.locked{opacity:.45;pointer-events:none}
+.card-header{display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem}
+.card-step-num{width:32px;height:32px;border-radius:50%;background:var(--blue-light);color:var(--blue);font-weight:800;display:flex;align-items:center;justify-content:center;font-size:.85rem;flex-shrink:0}
+.card-header h3{font-size:1.05rem;font-weight:700;color:var(--text)}
+.card-header p{font-size:.85rem;color:var(--text-muted);margin-top:.1rem}
+
+/* ========== FORM ELEMENTS ========== */
+label{display:block;font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:.4rem}
+input[type=text],input[type=url],textarea{width:100%;padding:.7rem 1rem;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:.9rem;color:var(--text);background:#fff;transition:border-color .2s,box-shadow .2s;outline:none}
+input[type=text]:focus,input[type=url]:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+textarea{resize:vertical;min-height:90px}
+.input-row{display:flex;gap:.75rem}
+.input-row input{flex:1}
+
+/* ========== BUTTONS ========== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.7rem 1.5rem;border:none;border-radius:var(--radius-sm);font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--blue-dark);box-shadow:var(--shadow-md)}
+.btn-secondary{background:var(--bg);color:var(--text);border:1.5px solid var(--border)}
+.btn-secondary:hover{background:var(--border)}
+.btn-green{background:var(--green);color:#fff}
+.btn-green:hover:not(:disabled){background:#15803d}
+.btn-red{background:var(--red-light);color:var(--red);border:1.5px solid #fecaca}
+.btn-red:hover{background:#fee2e2}
+.btn-lg{padding:.875rem 2rem;font-size:1rem;border-radius:var(--radius)}
+.btn-full{width:100%}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-icon{padding:.5rem;min-width:36px}
+
+/* ========== AUTH CARD ========== */
+.auth-connect{display:flex;flex-direction:column;align-items:center;padding:1.5rem;text-align:center;gap:1rem}
+.auth-connect .google-btn{display:flex;align-items:center;gap:.75rem;background:#fff;border:1.5px solid var(--border);border-radius:var(--radius-sm);padding:.8rem 1.75rem;cursor:pointer;font-size:.95rem;font-weight:600;color:var(--text);transition:box-shadow .2s,border-color .2s;text-decoration:none}
+.auth-connect .google-btn:hover{border-color:#9ca3af;box-shadow:var(--shadow-md)}
+.google-logo{width:20px;height:20px}
+.user-info-row{display:flex;align-items:center;gap:.75rem;padding:.875rem 1.25rem;background:var(--green-light);border-radius:var(--radius-sm);border:1px solid #bbf7d0;width:100%}
+.user-info-row .avatar{width:38px;height:38px;background:var(--green);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem;flex-shrink:0}
+.user-info-row .info{flex:1;text-align:left}
+.user-info-row .name{font-weight:700;font-size:.9rem;color:#166534}
+.user-info-row .email{font-size:.8rem;color:#15803d}
+
+/* ========== FILE UPLOAD ========== */
+.dropzone{border:2px dashed var(--border);border-radius:var(--radius-sm);padding:2rem;text-align:center;cursor:pointer;transition:all .2s;background:#fafbfc}
+.dropzone:hover,.dropzone.drag-over{border-color:var(--blue);background:var(--blue-light)}
+.dropzone-icon{font-size:2rem;margin-bottom:.5rem}
+.dropzone p{font-size:.85rem;color:var(--text-muted)}
+.dropzone strong{color:var(--blue);cursor:pointer}
+.dropzone input{display:none}
+.file-list{margin-top:.75rem;display:flex;flex-direction:column;gap:.4rem}
+.file-item{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;background:var(--bg);border-radius:var(--radius-sm);font-size:.83rem}
+.file-icon{font-size:1rem}
+.file-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-size{color:var(--text-muted);font-size:.75rem}
+.file-remove{cursor:pointer;color:var(--text-muted);padding:.2rem;border-radius:.25rem;transition:color .2s}
+.file-remove:hover{color:var(--red)}
+
+/* ========== TASK INFO ========== */
+.task-info-box{background:var(--blue-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:1rem 1.25rem;margin-bottom:1.25rem}
+.task-info-box h4{font-size:1rem;font-weight:700;color:#1e3a8a;margin-bottom:.25rem}
+.task-info-box p{font-size:.83rem;color:#1e40af}
+.task-meta{display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.5rem}
+.tag{display:inline-flex;align-items:center;gap:.3rem;font-size:.75rem;font-weight:600;padding:.2rem .6rem;border-radius:2rem;background:rgba(37,99,235,.1);color:var(--blue)}
+
+/* ========== STUDENT LIST ========== */
+.students-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.students-header h4{font-weight:700;font-size:.9rem}
+.select-all-btn{font-size:.8rem;color:var(--blue);cursor:pointer;font-weight:600;border:none;background:none;padding:.2rem}
+.student-grid{display:flex;flex-direction:column;gap:.35rem;max-height:340px;overflow-y:auto;padding-right:.25rem}
+.student-grid::-webkit-scrollbar{width:4px}
+.student-grid::-webkit-scrollbar-track{background:var(--bg)}
+.student-grid::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:2px}
+.student-item{display:flex;align-items:center;gap:.75rem;padding:.6rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:#fff;cursor:pointer;transition:all .15s;user-select:none}
+.student-item:hover{border-color:var(--blue);background:var(--blue-light)}
+.student-item.selected{border-color:var(--blue);background:var(--blue-light)}
+.student-item.no-submission{opacity:.55}
+.student-check{width:18px;height:18px;border-radius:.3rem;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
+.student-item.selected .student-check{background:var(--blue);border-color:var(--blue);color:#fff}
+.student-avatar-sm{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0}
+.student-name{flex:1;font-size:.875rem;font-weight:500}
+.student-badge{font-size:.7rem;padding:.1rem .5rem;border-radius:2rem;font-weight:600}
+.badge-submitted{background:#dcfce7;color:#166534}
+.badge-late{background:#fef3c7;color:#92400e}
+.badge-missing{background:#f1f5f9;color:#64748b}
+
+/* ========== PROGRESS ========== */
+.progress-wrapper{margin-bottom:1.5rem}
+.progress-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem;font-size:.85rem}
+.progress-bar-bg{width:100%;height:10px;background:var(--border);border-radius:99px;overflow:hidden}
+.progress-bar-fill{height:100%;background:linear-gradient(90deg,var(--blue),#6366f1);border-radius:99px;transition:width .5s ease;width:0%}
+.current-student{font-size:.875rem;color:var(--text-muted);margin-top:.5rem}
+
+.student-results{display:flex;flex-direction:column;gap:.5rem;margin-top:1rem;max-height:400px;overflow-y:auto;padding-right:.2rem}
+.result-item{display:flex;align-items:center;gap:.875rem;padding:.6rem 1rem;border-radius:var(--radius-sm);background:#fff;border:1px solid var(--border);animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.result-icon{font-size:1.1rem;flex-shrink:0}
+.result-name{flex:1;font-size:.875rem;font-weight:500}
+.result-nota{font-weight:800;font-size:.95rem;min-width:40px;text-align:right}
+.nota-alta{color:var(--green)}
+.nota-media{color:var(--amber)}
+.nota-baja{color:var(--red)}
+.nota-na{color:var(--gray)}
+.result-link{font-size:.75rem;color:var(--blue);white-space:nowrap}
+.status-spinning::after{content:'…';animation:dots 1.2s infinite step-end}
+
+/* ========== RESULTS PANEL ========== */
+.results-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.75rem;margin-bottom:1.5rem}
+.stat-box{background:var(--card);border-radius:var(--radius-sm);padding:1rem;text-align:center;box-shadow:var(--shadow);border:1px solid var(--border)}
+.stat-box .num{font-size:1.75rem;font-weight:900;line-height:1}
+.stat-box .lbl{font-size:.75rem;color:var(--text-muted);margin-top:.25rem;font-weight:500}
+.stat-blue .num{color:var(--blue)}
+.stat-green .num{color:var(--green)}
+.stat-amber .num{color:var(--amber)}
+.stat-red .num{color:var(--red)}
+.stat-gray .num{color:var(--gray)}
+
+.download-row{display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem}
+.download-btn{display:flex;align-items:center;gap:.6rem;padding:.8rem 1.25rem;border-radius:var(--radius-sm);border:1.5px solid var(--border);background:#fff;color:var(--text);cursor:pointer;font-size:.875rem;font-weight:600;transition:all .2s;text-decoration:none}
+.download-btn:hover{border-color:var(--blue);background:var(--blue-light);color:var(--blue)}
+.download-btn .icon{font-size:1.1rem}
+.download-btn-primary{background:var(--blue);color:#fff;border-color:var(--blue);font-size:.95rem;padding:.9rem 1.5rem}
+.download-btn-primary:hover{background:var(--blue-dark);color:#fff}
+
+/* ========== ALERTS ========== */
+.alert{padding:.875rem 1.125rem;border-radius:var(--radius-sm);font-size:.875rem;margin-bottom:1rem;display:flex;align-items:flex-start;gap:.6rem;animation:fadeIn .25s ease}
+.alert-error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+.alert-success{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}
+.alert-warning{background:#fff7ed;border:1px solid #fed7aa;color:#92400e}
+.alert-info{background:var(--blue-light);border:1px solid #bfdbfe;color:#1e40af}
+
+/* ========== MISC ========== */
+.hidden{display:none!important}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.divider{border:none;border-top:1px solid var(--border);margin:1.25rem 0}
+.text-muted{color:var(--text-muted);font-size:.85rem}
+.mt-1{margin-top:.5rem}
+.mt-2{margin-top:1rem}
+.flex-center{display:flex;align-items:center;justify-content:center}
+.gap-1{gap:.5rem}
+
+/* Tooltips */
+[data-tip]{position:relative;cursor:help}
+[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;font-size:.75rem;padding:.3rem .6rem;border-radius:.375rem;white-space:nowrap;z-index:50;pointer-events:none}
+
+@media(max-width:600px){
+  .steps::before{display:none}
+  .steps{gap:.5rem}
+  .dot-label{display:none}
+  .input-row{flex-direction:column}
+  .download-row{flex-direction:column}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== TOP BAR ===== -->
+<header class="top-bar">
+  <div class="logo">
+    <div class="logo-icon">🎓</div>
+    <div>
+      <div>Corrector IA</div>
+      <div style="font-size:.7rem;opacity:.7;font-weight:400">Google Classroom + Groq IA</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:.6rem">
+    <button class="user-pill" onclick="toggleSettings()" title="Configurar API Key de Groq">
+      ⚙️ <span id="groq-status-pill">Ajustes</span>
+    </button>
+    <div id="header-user" class="hidden">
+      <button class="user-pill" onclick="handleLogout()">
+        <div class="user-avatar" id="header-avatar">?</div>
+        <span id="header-email">usuario</span>
+        <span style="opacity:.6;font-size:.8rem">· Salir</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== SETTINGS DRAWER ===== -->
+<div id="settings-drawer" class="hidden" style="background:#1e3a8a;color:#fff;padding:1rem 1.5rem;border-bottom:2px solid #3b82f6">
+  <div style="max-width:860px;margin:0 auto">
+    <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">⚙️ Configuración — API Key de Groq</div>
+    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        <label style="font-size:.78rem;opacity:.8;display:block;margin-bottom:.3rem">
+          API Key de Groq
+          (<a href="https://console.groq.com/keys" target="_blank" style="color:#93c5fd">obtener gratis en console.groq.com</a>)
+        </label>
+        <input type="password" id="groq-key-input" placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
+          style="width:100%;padding:.6rem .875rem;border-radius:.4rem;border:none;font-size:.875rem;background:rgba(255,255,255,.15);color:#fff;outline:none">
+      </div>
+      <div style="min-width:180px">
+        <label style="font-size:.78rem;opacity:.8;display:block;margin-bottom:.3rem">Modelo</label>
+        <select id="groq-model-select"
+          style="width:100%;padding:.6rem .875rem;border-radius:.4rem;border:none;font-size:.85rem;background:rgba(255,255,255,.15);color:#fff">
+          <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout (recomendado)</option>
+          <option value="llama-3.2-90b-vision-preview">Llama 3.2 90B Vision</option>
+          <option value="llama-3.2-11b-vision-preview">Llama 3.2 11B Vision (más rápido)</option>
+        </select>
+      </div>
+      <button class="btn btn-green" onclick="saveSettings()" style="white-space:nowrap">Guardar</button>
+    </div>
+    <div id="settings-msg" style="margin-top:.5rem;font-size:.8rem;min-height:1em"></div>
+  </div>
+</div>
+
+<!-- ===== PAGE ===== -->
+<main class="page">
+
+  <div class="hero">
+    <h2>Corrige tareas en minutos con IA</h2>
+    <p>Conecta Google Classroom, carga la tarea y deja que Gemini corrija a tus alumnos.</p>
+  </div>
+
+  <!-- STEPPER -->
+  <div class="steps">
+    <div class="step-dot active" id="dot-1">
+      <div class="dot" id="dot-num-1">1</div>
+      <div class="dot-label">Conectar</div>
+    </div>
+    <div class="step-dot locked" id="dot-2">
+      <div class="dot" id="dot-num-2">2</div>
+      <div class="dot-label">Tarea</div>
+    </div>
+    <div class="step-dot locked" id="dot-3">
+      <div class="dot" id="dot-num-3">3</div>
+      <div class="dot-label">Corregir</div>
+    </div>
+    <div class="step-dot locked" id="dot-4">
+      <div class="dot" id="dot-num-4">4</div>
+      <div class="dot-label">Resultados</div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 1: AUTH ===== -->
+  <div class="card active-card" id="card-auth">
+    <div class="card-header">
+      <div class="card-step-num">1</div>
+      <div>
+        <h3>Conectar con Google</h3>
+        <p>Necesitas autorizar el acceso a Google Classroom para cargar las entregas</p>
+      </div>
+    </div>
+
+    <div id="auth-not-connected" class="auth-connect">
+      <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+        <rect width="56" height="56" rx="12" fill="#EFF6FF"/>
+        <path d="M28 16a12 12 0 1 0 0 24 12 12 0 0 0 0-24zm0 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z" fill="#BFDBFE"/>
+        <circle cx="28" cy="25" r="4" fill="#2563EB"/>
+        <path d="M20 37c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <p style="max-width:380px;text-align:center;color:var(--text-muted)">
+        Inicia sesión con la cuenta de Google que usas en Classroom. La app solo leerá tus cursos y entregas.
+      </p>
+      <a href="/auth/login" class="google-btn">
+        <svg class="google-logo" viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Iniciar sesión con Google
+      </a>
+      <p class="text-muted" style="font-size:.78rem">
+        Se abrirá la ventana de autorización de Google en tu navegador
+      </p>
+    </div>
+
+    <div id="auth-connected" class="hidden">
+      <div class="user-info-row">
+        <div class="avatar" id="auth-avatar">G</div>
+        <div class="info">
+          <div class="name" id="auth-name">Cargando…</div>
+          <div class="email" id="auth-email"></div>
+        </div>
+        <span style="color:var(--green);font-size:1.1rem">✓</span>
+      </div>
+      <div class="mt-2">
+        <button class="btn btn-primary btn-full btn-lg" onclick="goToStep2()">
+          Continuar — Cargar tarea →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 2: TAREA ===== -->
+  <div class="card locked" id="card-task">
+    <div class="card-header">
+      <div class="card-step-num">2</div>
+      <div>
+        <h3>Cargar tarea de Classroom</h3>
+        <p>Pega la URL de la tarea que quieres corregir</p>
+      </div>
+    </div>
+
+    <div id="step2-content">
+      <label>URL de la tarea en Google Classroom</label>
+      <div class="input-row">
+        <input type="url" id="task-url" placeholder="https://classroom.google.com/c/XXXXX/a/YYYYY/details" />
+        <button class="btn btn-primary" id="btn-load-task" onclick="loadTask()">
+          Cargar
+        </button>
+      </div>
+      <p class="text-muted mt-1">La URL la encuentras en la barra del navegador al abrir la tarea en Classroom</p>
+      <button class="btn btn-secondary mt-1" style="font-size:.8rem;padding:.4rem .9rem" onclick="showMyCourses()">🔍 Ver mis cursos disponibles</button>
+
+      <div id="task-alert" class="hidden mt-2"></div>
+      <div id="my-courses-panel" class="hidden mt-2" style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem">
+        <strong style="font-size:.85rem">Cursos en tu cuenta:</strong>
+        <div id="my-courses-list" style="margin-top:.5rem;font-size:.85rem"></div>
+      </div>
+
+      <!-- Resultado cargado -->
+      <div id="task-loaded" class="hidden mt-2">
+        <div class="task-info-box">
+          <h4 id="task-title">—</h4>
+          <p id="task-course">—</p>
+          <div class="task-meta">
+            <span class="tag" id="task-count-tag">0 alumnos</span>
+            <span class="tag" id="task-submitted-tag">0 entregas</span>
+          </div>
+        </div>
+
+        <div class="students-header">
+          <h4>Selecciona qué alumnos corregir</h4>
+          <button class="select-all-btn" onclick="toggleSelectAll()">Seleccionar todos</button>
+        </div>
+        <div class="student-grid" id="student-grid"><!-- filled by JS --></div>
+
+        <div class="mt-2">
+          <button class="btn btn-primary btn-full btn-lg" onclick="goToStep3()">
+            Continuar — Configurar corrección →
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 3: CORRECCIÓN ===== -->
+  <div class="card locked" id="card-correct">
+    <div class="card-header">
+      <div class="card-step-num">3</div>
+      <div>
+        <h3>Configurar y lanzar la corrección</h3>
+        <p>Añade material de referencia e instrucciones opcionales</p>
+      </div>
+    </div>
+
+    <div id="step3-content">
+      <!-- Dropzone -->
+      <label>
+        Material de referencia
+        <span class="text-muted" style="font-weight:400"> — Rúbrica, solución, pauta (opcional pero recomendado)</span>
+      </label>
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()"
+           ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleFileSelect(event)">
+        <div class="dropzone-icon">📎</div>
+        <p><strong>Haz clic para subir</strong> o arrastra los archivos aquí</p>
+        <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">PDF, imágenes, Word, TXT — hasta 20 MB cada archivo</p>
+      </div>
+      <div class="file-list" id="file-list"></div>
+
+      <div class="divider"></div>
+
+      <label>Instrucciones adicionales para la corrección <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+      <textarea id="instructions" rows="4" placeholder="Ej: Corrige con criterio de selectividad. La pregunta 3 vale el doble. Descuenta 0.1 por cada falta de ortografía…"></textarea>
+
+      <div class="mt-2" id="step3-summary" style="background:var(--blue-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:1rem;font-size:.875rem;color:#1e40af"></div>
+
+      <div class="mt-2">
+        <button class="btn btn-green btn-full btn-lg" id="btn-start-correction" onclick="startCorrection()">
+          🚀 Iniciar corrección con IA
+        </button>
+      </div>
+    </div>
+
+    <!-- PROGRESS -->
+    <div id="correction-progress" class="hidden">
+      <div class="progress-wrapper">
+        <div class="progress-top">
+          <span id="progress-text">Preparando…</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progress-fill"></div>
+        </div>
+        <div class="current-student" id="current-student"></div>
+      </div>
+
+      <div class="student-results" id="student-results"></div>
+    </div>
+  </div>
+
+  <!-- ===== STEP 4: RESULTADOS ===== -->
+  <div class="card locked" id="card-results">
+    <div class="card-header">
+      <div class="card-step-num">4</div>
+      <div>
+        <h3>Resultados de la corrección</h3>
+        <p>Descarga los archivos generados</p>
+      </div>
+    </div>
+
+    <div id="results-content">
+      <div class="results-stats" id="stats-grid"></div>
+
+      <div class="download-row" id="download-row"></div>
+
+      <div id="results-list"></div>
+
+      <div class="divider"></div>
+      <button class="btn btn-secondary" onclick="newCorrection()">← Corregir otra tarea</button>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ================================================================
+//  STATE
+// ================================================================
+let state = {
+  step: 1,
+  user: null,
+  task: null,        // loaded task data
+  submissions: [],   // all submissions
+  selected: new Set(), // selected student IDs
+  refFiles: [],      // reference file objects
+  correctionOutput: null,
+};
+
+// ================================================================
+//  INIT
+// ================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  checkAuth();
+  checkConfig();
+  handleUrlParams();
+});
+
+// ================================================================
+//  SETTINGS / CONFIG
+// ================================================================
+async function checkConfig() {
+  try {
+    const r = await fetch('/api/config');
+    const cfg = await r.json();
+    updateGroqPill(cfg);
+    if (cfg.groqModel) {
+      const sel = document.getElementById('groq-model-select');
+      if (sel) sel.value = cfg.groqModel;
+    }
+  } catch (e) {}
+}
+
+function updateGroqPill(cfg) {
+  const pill = document.getElementById('groq-status-pill');
+  if (!pill) return;
+  if (cfg.hasGroqKey) {
+    pill.textContent = `✅ Groq ${cfg.groqKeyPreview}`;
+  } else {
+    pill.textContent = '⚠️ Configura Groq';
+    // Abrir ajustes automáticamente si no hay key
+    document.getElementById('settings-drawer').classList.remove('hidden');
+  }
+}
+
+function toggleSettings() {
+  document.getElementById('settings-drawer').classList.toggle('hidden');
+}
+
+async function saveSettings() {
+  const key   = document.getElementById('groq-key-input').value.trim();
+  const model = document.getElementById('groq-model-select').value;
+  const msg   = document.getElementById('settings-msg');
+
+  if (!key && !model) { msg.textContent = 'Introduce al menos la API Key.'; return; }
+
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groqApiKey: key || undefined, groqModel: model }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      msg.style.color = '#86efac';
+      msg.textContent = '✅ Guardado correctamente';
+      await checkConfig();
+      setTimeout(() => {
+        document.getElementById('settings-drawer').classList.add('hidden');
+        msg.textContent = '';
+        document.getElementById('groq-key-input').value = '';
+      }, 1500);
+    }
+  } catch (e) {
+    msg.style.color = '#fca5a5';
+    msg.textContent = `Error: ${e.message}`;
+  }
+}
+
+function handleUrlParams() {
+  const p = new URLSearchParams(location.search);
+  if (p.get('auth') === 'success') {
+    history.replaceState({}, '', '/');
+    checkAuth();
+  } else if (p.get('auth') === 'error') {
+    const msg = p.get('msg') || 'Error desconocido';
+    showAlert('auth-alert', `Error al conectar: ${msg}`, 'error');
+    history.replaceState({}, '', '/');
+  }
+}
+
+async function checkAuth() {
+  try {
+    const r = await fetch('/auth/status');
+    const data = await r.json();
+    state.user = data;
+    updateAuthUI(data);
+  } catch (e) {
+    console.error('Auth check failed', e);
+  }
+}
+
+function updateAuthUI(data) {
+  const connected = document.getElementById('auth-connected');
+  const notConnected = document.getElementById('auth-not-connected');
+  const headerUser = document.getElementById('header-user');
+
+  if (data.authenticated) {
+    connected.classList.remove('hidden');
+    notConnected.classList.add('hidden');
+    headerUser.classList.remove('hidden');
+
+    const initials = (data.name || data.email || 'U').substring(0, 2).toUpperCase();
+    document.getElementById('auth-avatar').textContent = initials;
+    document.getElementById('header-avatar').textContent = initials;
+    document.getElementById('auth-name').textContent = data.name || data.email || 'Conectado';
+    document.getElementById('auth-email').textContent = data.email || '';
+    document.getElementById('header-email').textContent = data.email || '';
+
+    markStepDone(1);
+  } else {
+    connected.classList.add('hidden');
+    notConnected.classList.remove('hidden');
+    headerUser.classList.add('hidden');
+  }
+}
+
+async function handleLogout() {
+  if (!confirm('¿Cerrar sesión?')) return;
+  await fetch('/auth/logout', { method: 'POST' });
+  state.user = null;
+  location.reload();
+}
+
+// ================================================================
+//  STEP NAVIGATION
+// ================================================================
+function markStepDone(n) {
+  const dot = document.getElementById(`dot-${n}`);
+  dot.classList.remove('active', 'locked');
+  dot.classList.add('done');
+  document.getElementById(`dot-num-${n}`).textContent = '✓';
+}
+
+function activateStep(n) {
+  const dot = document.getElementById(`dot-${n}`);
+  dot.classList.remove('locked', 'done');
+  dot.classList.add('active');
+  // Unlock card
+  const cards = ['', 'card-auth', 'card-task', 'card-correct', 'card-results'];
+  document.getElementById(cards[n]).classList.remove('locked');
+  document.getElementById(cards[n]).classList.add('active-card');
+}
+
+function goToStep2() {
+  activateStep(2);
+  document.getElementById('card-task').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function goToStep3() {
+  const selected = getSelectedSubmissions();
+  if (selected.length === 0) {
+    alert('Selecciona al menos un alumno para corregir.');
+    return;
+  }
+  activateStep(3);
+  markStepDone(2);
+  updateStep3Summary();
+  document.getElementById('card-correct').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ================================================================
+//  LOAD TASK
+// ================================================================
+async function loadTask() {
+  const url = document.getElementById('task-url').value.trim();
+  if (!url) return alert('Introduce la URL de la tarea.');
+
+  const btn = document.getElementById('btn-load-task');
+  setLoading(btn, true, 'Cargando…');
+  hideAlert('task-alert');
+
+  try {
+    const r = await fetch('/api/load-task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await r.json();
+
+    if (!r.ok) {
+      showAlertEl('task-alert', data.error || 'Error al cargar la tarea', 'error');
+      if (r.status === 401) {
+        showAlertEl('task-alert', 'Sesión expirada. <a href="/auth/login">Vuelve a conectar</a>', 'error');
+      }
+      return;
+    }
+
+    state.task = data;
+    state.submissions = data.submissions;
+    renderTaskInfo(data);
+
+  } catch (e) {
+    showAlertEl('task-alert', `Error de red: ${e.message}`, 'error');
+  } finally {
+    setLoading(btn, false, 'Cargar');
+  }
+}
+
+function renderTaskInfo(data) {
+  document.getElementById('task-title').textContent = data.task;
+  document.getElementById('task-course').textContent = `📚 ${data.course}`;
+
+  const total = data.submissions.length;
+  const submitted = data.submissions.filter(s => s.hasSubmission).length;
+  document.getElementById('task-count-tag').textContent = `${total} alumno${total !== 1 ? 's' : ''}`;
+  document.getElementById('task-submitted-tag').textContent = `${submitted} entrega${submitted !== 1 ? 's' : ''}`;
+
+  renderStudentGrid(data.submissions);
+
+  document.getElementById('task-loaded').classList.remove('hidden');
+}
+
+function renderStudentGrid(submissions) {
+  const grid = document.getElementById('student-grid');
+  grid.innerHTML = '';
+  state.selected.clear();
+
+  submissions.forEach(sub => {
+    if (sub.hasSubmission) state.selected.add(sub.studentId);
+
+    const item = document.createElement('div');
+    item.className = `student-item${sub.hasSubmission ? ' selected' : ' no-submission'}`;
+    item.dataset.id = sub.studentId;
+    item.onclick = () => toggleStudent(sub.studentId, item, sub.hasSubmission);
+
+    const initials = sub.studentName.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    const badgeClass = sub.hasSubmission ? (sub.late ? 'badge-late' : 'badge-submitted') : 'badge-missing';
+    const badgeText = sub.hasSubmission ? (sub.late ? '⏰ Tarde' : '✓ Entregado') : '— Sin entrega';
+
+    item.innerHTML = `
+      <div class="student-check">${sub.hasSubmission ? '✓' : ''}</div>
+      <div class="student-avatar-sm">${initials}</div>
+      <span class="student-name">${esc(sub.studentName)}</span>
+      <span class="student-badge ${badgeClass}">${badgeText}</span>
+    `;
+    grid.appendChild(item);
+  });
+}
+
+function toggleStudent(id, el, hasSubmission) {
+  if (state.selected.has(id)) {
+    state.selected.delete(id);
+    el.classList.remove('selected');
+    el.querySelector('.student-check').textContent = '';
+  } else {
+    state.selected.add(id);
+    el.classList.add('selected');
+    el.querySelector('.student-check').textContent = '✓';
+  }
+}
+
+function toggleSelectAll() {
+  const allIds = state.submissions.filter(s => s.hasSubmission).map(s => s.studentId);
+  const allSelected = allIds.every(id => state.selected.has(id));
+
+  if (allSelected) {
+    // Deselect all
+    allIds.forEach(id => state.selected.delete(id));
+    document.querySelectorAll('.student-item.selected').forEach(el => {
+      el.classList.remove('selected');
+      el.querySelector('.student-check').textContent = '';
+    });
+  } else {
+    // Select all with submission
+    state.submissions.forEach(sub => {
+      if (sub.hasSubmission) {
+        state.selected.add(sub.studentId);
+        const el = document.querySelector(`.student-item[data-id="${sub.studentId}"]`);
+        if (el) { el.classList.add('selected'); el.querySelector('.student-check').textContent = '✓'; }
+      }
+    });
+  }
+}
+
+function getSelectedSubmissions() {
+  return state.submissions.filter(s => state.selected.has(s.studentId));
+}
+
+// ================================================================
+//  FILE UPLOAD
+// ================================================================
+function handleFileSelect(e) {
+  addFiles(Array.from(e.target.files));
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  document.getElementById('dropzone').classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+  document.getElementById('dropzone').classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropzone').classList.remove('drag-over');
+  addFiles(Array.from(e.dataTransfer.files));
+}
+
+function addFiles(newFiles) {
+  newFiles.forEach(f => {
+    if (!state.refFiles.find(x => x.name === f.name && x.size === f.size)) {
+      state.refFiles.push(f);
+    }
+  });
+  renderFileList();
+}
+
+function removeFile(idx) {
+  state.refFiles.splice(idx, 1);
+  renderFileList();
+}
+
+function renderFileList() {
+  const list = document.getElementById('file-list');
+  list.innerHTML = '';
+  state.refFiles.forEach((f, i) => {
+    const icon = f.type.includes('pdf') ? '📄' : f.type.includes('image') ? '🖼️' : '📝';
+    const size = f.size > 1e6 ? (f.size / 1e6).toFixed(1) + ' MB' : (f.size / 1024).toFixed(0) + ' KB';
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    item.innerHTML = `
+      <span class="file-icon">${icon}</span>
+      <span class="file-name">${esc(f.name)}</span>
+      <span class="file-size">${size}</span>
+      <span class="file-remove" onclick="removeFile(${i})" title="Quitar">✕</span>
+    `;
+    list.appendChild(item);
+  });
+}
+
+// ================================================================
+//  STEP 3 SUMMARY
+// ================================================================
+function updateStep3Summary() {
+  const selected = getSelectedSubmissions();
+  const box = document.getElementById('step3-summary');
+  box.innerHTML = `
+    <strong>📝 Resumen:</strong> Se corregirán <strong>${selected.length} entregas</strong>
+    de la tarea <em>"${esc(state.task?.task || '')}"</em>
+    (${esc(state.task?.course || '')}).
+    ${state.refFiles.length > 0 ? `<br>📎 ${state.refFiles.length} archivo(s) de referencia adjunto(s).` : ''}
+    <br><span style="font-size:.8rem;color:#1e40af;margin-top:.25rem;display:block">
+      ⏱ Estimado: ~${Math.ceil(selected.length * 0.5)} – ${Math.ceil(selected.length * 1)} minuto(s)
+    </span>
+  `;
+}
+
+// ================================================================
+//  START CORRECTION
+// ================================================================
+async function startCorrection() {
+  const selected = getSelectedSubmissions();
+  if (selected.length === 0) return alert('Selecciona al menos un alumno.');
+
+  // Swap UI
+  document.getElementById('step3-content').classList.add('hidden');
+  document.getElementById('correction-progress').classList.remove('hidden');
+  document.getElementById('btn-start-correction').disabled = true;
+  markStepDone(3);
+  activateStep(4);
+
+  // Build FormData
+  const fd = new FormData();
+  fd.append('courseId', state.task.courseId);
+  fd.append('courseWorkId', state.task.courseWorkId);
+  fd.append('taskName', state.task.task);
+  fd.append('courseName', state.task.course);
+  fd.append('instructions', document.getElementById('instructions').value);
+  fd.append('submissionsJson', JSON.stringify(selected));
+  state.refFiles.forEach(f => fd.append('referenceFiles', f));
+
+  // SSE via fetch (streaming)
+  try {
+    const response = await fetch('/api/correct', { method: 'POST', body: fd });
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE events from buffer
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop(); // keep incomplete last part
+
+      for (const part of parts) {
+        const lines = part.split('\n');
+        let event = 'message', data = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) event = line.slice(7).trim();
+          if (line.startsWith('data: ')) data = line.slice(6).trim();
+        }
+        if (data) {
+          try { handleSSEEvent(event, JSON.parse(data)); } catch (e) {}
+        }
+      }
+    }
+  } catch (e) {
+    addResultItem('error', '⚠️ Error de conexión', '', e.message, null);
+  }
+}
+
+// ================================================================
+//  SSE HANDLERS
+// ================================================================
+function handleSSEEvent(event, data) {
+  switch (event) {
+    case 'start':
+      updateProgress(0, data.total, `Iniciando… (${data.total} entregas)`);
+      break;
+
+    case 'progress':
+      const pct = Math.round(((data.current - 1) / data.total) * 100);
+      updateProgress(pct, data.total, data.message, data.current, data.student);
+      break;
+
+    case 'student_done':
+      addResultItem('done', data.student, data.nota, data.summary, data.htmlFile);
+      break;
+
+    case 'student_error':
+      addResultItem('error', data.student, null, data.error, null);
+      break;
+
+    case 'warning':
+      addResultItem('warning', data.student, null, data.message, null);
+      break;
+
+    case 'progress_general':
+      document.getElementById('current-student').textContent = data.message;
+      break;
+
+    case 'retry':
+      document.getElementById('current-student').textContent =
+        `⏳ Límite de API — esperando ${data.wait}s antes de reintentar (intento ${data.attempt}/${data.max})…`;
+      break;
+
+    case 'waiting':
+      document.getElementById('current-student').textContent = `⏱ ${data.message}`;
+      break;
+
+    case 'done':
+      updateProgress(100, 1, '¡Corrección completada!');
+      state.correctionOutput = data;
+      showResults(data);
+      break;
+
+    case 'error':
+      addResultItem('error', 'Error fatal', null, data.message, null);
+      break;
+  }
+}
+
+function updateProgress(pct, total, msg, current, student) {
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-percent').textContent = pct + '%';
+  document.getElementById('progress-text').textContent = msg;
+  if (student) {
+    document.getElementById('current-student').textContent = `👤 ${student}`;
+  }
+}
+
+function addResultItem(type, name, nota, summary, htmlFile) {
+  const list = document.getElementById('student-results');
+  const item = document.createElement('div');
+  item.className = 'result-item';
+
+  const icon = type === 'done' ? '✅' : type === 'warning' ? '⚠️' : '❌';
+  const notaStr = nota !== null && nota !== undefined ? Number(nota).toFixed(1) : '';
+  const notaClass = nota === null || nota === undefined ? 'nota-na'
+    : nota >= 7 ? 'nota-alta'
+    : nota >= 5 ? 'nota-media'
+    : 'nota-baja';
+
+  const linkHtml = htmlFile
+    ? `<a href="/${htmlFile}" target="_blank" class="result-link">Ver corrección →</a>`
+    : '';
+
+  item.innerHTML = `
+    <span class="result-icon">${icon}</span>
+    <span class="result-name">${esc(name)}</span>
+    <span class="result-nota ${notaClass}">${notaStr ? notaStr + '/10' : ''}</span>
+    ${linkHtml}
+  `;
+  list.appendChild(item);
+  list.scrollTop = list.scrollHeight;
+}
+
+// ================================================================
+//  RESULTS
+// ================================================================
+function showResults(data) {
+  document.getElementById('card-results').classList.remove('locked');
+  document.getElementById('card-results').classList.add('active-card');
+  document.getElementById('card-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const s = data.stats;
+  const statsGrid = document.getElementById('stats-grid');
+  statsGrid.innerHTML = `
+    <div class="stat-box stat-blue"><div class="num">${s.total}</div><div class="lbl">Total alumnos</div></div>
+    <div class="stat-box stat-green"><div class="num">${s.corrected}</div><div class="lbl">Corregidos</div></div>
+    <div class="stat-box stat-amber"><div class="num">${s.noSubmission}</div><div class="lbl">Sin entrega</div></div>
+    <div class="stat-box stat-red"><div class="num">${s.errors}</div><div class="lbl">Errores</div></div>
+    <div class="stat-box" style="border-top:3px solid var(--blue)"><div class="num" style="color:var(--blue)">${s.average}</div><div class="lbl">Nota media</div></div>
+  `;
+
+  // Extraer courseId y workId del outputDir  (ej: "correcciones/173300032092_859656592631")
+  const parts = data.outputDir.split('/').pop().split('_');
+  const courseId = parts[0];
+  const workId = parts.slice(1).join('_');
+
+  const dlRow = document.getElementById('download-row');
+  dlRow.innerHTML = `
+    <a href="/api/download-zip/${courseId}/${workId}" class="download-btn download-btn-primary">
+      <span class="icon">📦</span> Descargar TODO como ZIP
+    </a>
+    <a href="/api/download-file?path=${encodeURIComponent(data.excelFile)}" class="download-btn">
+      <span class="icon">📊</span> Descargar Excel
+    </a>
+  `;
+
+  const resList = document.getElementById('results-list');
+  resList.innerHTML = `
+    <p class="text-muted mt-1" style="font-size:.8rem">
+      💡 Haz clic en "Ver corrección →" para abrir el informe de cada alumno.
+      Desde ahí puedes imprimirlo o guardarlo como PDF.<br>
+      Usa <strong>"Descargar TODO como ZIP"</strong> para obtener todos los archivos a la vez.
+    </p>`;
+}
+
+async function showMyCourses() {
+  const panel = document.getElementById('my-courses-panel');
+  const list = document.getElementById('my-courses-list');
+  panel.classList.remove('hidden');
+  list.innerHTML = '<span style="color:var(--text-muted)">Cargando…</span>';
+  try {
+    const r = await fetch('/api/my-courses');
+    const data = await r.json();
+    if (data.error) { list.innerHTML = `<span style="color:var(--red)">${esc(data.error)}</span>`; return; }
+    if (!data.courses.length) { list.innerHTML = '<span style="color:var(--text-muted)">No se encontraron cursos en esta cuenta.</span>'; return; }
+    list.innerHTML = data.courses.map(c =>
+      `<div style="padding:.3rem 0;border-bottom:1px solid var(--border)">
+        <strong>${esc(c.name)}</strong>${c.section ? ` · ${esc(c.section)}` : ''}
+        <span style="font-size:.75rem;color:var(--text-muted);margin-left:.5rem">ID: ${c.id}</span>
+      </div>`
+    ).join('');
+  } catch(e) {
+    list.innerHTML = `<span style="color:var(--red)">Error: ${esc(e.message)}</span>`;
+  }
+}
+
+function newCorrection() {
+  state.task = null;
+  state.submissions = [];
+  state.selected.clear();
+  state.refFiles = [];
+  state.correctionOutput = null;
+  location.reload();
+}
+
+// ================================================================
+//  UTILS
+// ================================================================
+function setLoading(btn, loading, text) {
+  btn.disabled = loading;
+  btn.innerHTML = loading ? `<span class="spinner"></span> ${text}` : text;
+}
+
+function showAlertEl(id, html, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `alert alert-${type}`;
+  el.innerHTML = html;
+  el.classList.remove('hidden');
+}
+
+function hideAlert(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.add('hidden');
+}
+
+function showAlert(id, html, type) { showAlertEl(id, html, type); }
+
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

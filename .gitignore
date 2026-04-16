@@ -1,0 +1,18 @@
+# Dependencias
+node_modules/
+
+# Credenciales y tokens — NUNCA subir al repo
+client_secret_*.json
+token.json
+config.json
+*.pem
+*.key
+
+# Archivos generados por la app
+correcciones/
+
+# Sistema
+.DS_Store
+*.log
+.env
+.claude/
