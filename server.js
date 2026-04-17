@@ -41,7 +41,10 @@ function getGeminiKey() {
   return process.env.GEMINI_API_KEY || appConfig.geminiApiKey || '';
 }
 function getProvider() {
-  return process.env.AI_PROVIDER || appConfig.aiProvider || 'gemini';
+  if (process.env.AI_PROVIDER) return process.env.AI_PROVIDER;
+  if (appConfig.aiProvider) return appConfig.aiProvider;
+  if (getGroqKey() && !getGeminiKey()) return 'groq';
+  return 'gemini';
 }
 // Groq: único modelo de visión disponible actualmente
 const GROQ_MODEL_DEFAULT = 'meta-llama/llama-4-scout-17b-16e-instruct';
@@ -1197,7 +1200,7 @@ app.post('/api/student-files', express.json({ limit: '2mb' }), async (req, res) 
   res.json({ studentName, studentEmail, files });
 });
 
-app.post('/api/save-correction', express.json({ limit: '512kb' }), async (req, res) => {
+app.post('/api/save-correction', express.json({ limit: '10mb' }), async (req, res) => {
   const { dirName, studentName, taskName, courseName, correction } = req.body;
   if (!dirName || !studentName || !correction) {
     return res.status(400).json({ error: 'Faltan parámetros' });
@@ -1220,7 +1223,7 @@ app.post('/api/save-correction', express.json({ limit: '512kb' }), async (req, r
   }
 });
 
-app.post('/api/finalize-corrections', express.json({ limit: '2mb' }), async (req, res) => {
+app.post('/api/finalize-corrections', express.json({ limit: '10mb' }), async (req, res) => {
   const { dirName, rows, totalSubmissions } = req.body;
   if (!dirName || !rows) return res.status(400).json({ error: 'Faltan parámetros' });
   try {

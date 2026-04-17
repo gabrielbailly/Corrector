@@ -1185,7 +1185,10 @@ async function startCorrection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dirName, studentName, studentEmail, taskName, courseName, correction }),
       });
-      const saved = await saveRes.json();
+      const saved = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok) {
+        throw new Error(saved.error || `Error guardando la correccion: ${saveRes.status}`);
+      }
 
       addResultItem('done', studentName, correction.nota, correction.evaluacion_general, saved.htmlFile);
 
@@ -1230,7 +1233,10 @@ async function startCorrection() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dirName, rows: excelRows, totalSubmissions: selected.length }),
     });
-    const finalData = await finalRes.json();
+    const finalData = await finalRes.json().catch(() => ({}));
+    if (!finalRes.ok) {
+      throw new Error(finalData.error || `Error generando Excel: ${finalRes.status}`);
+    }
     updateProgress(100, 1, '¡Corrección completada!');
     const notes = excelRows.filter(r => typeof r.Nota === 'number');
     const avg = notes.length ? (notes.reduce((s, r) => s + r.Nota, 0) / notes.length).toFixed(2) : '0.00';
