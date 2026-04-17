@@ -998,6 +998,8 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
     // Sin entrega
     for (const s of noSubmission) {
       excelRows.push({
+        Curso: courseName,
+        Tarea: taskName,
         Alumno: s.studentName,
         Email: s.studentEmail || '',
         Nota: '',
@@ -1089,6 +1091,8 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
         // Agregar a Excel
         const nota = correction.nota !== null && correction.nota !== undefined ? Number(correction.nota) : '';
         excelRows.push({
+          Curso: courseName,
+          Tarea: taskName,
           Alumno: sub.studentName,
           Email: sub.studentEmail || '',
           Nota: nota,
@@ -1112,6 +1116,8 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
         console.error(`Error con ${sub.studentName}:`, err.message);
         send('student_error', { student: sub.studentName, error: err.message });
         excelRows.push({
+          Curso: courseName,
+          Tarea: taskName,
           Alumno: sub.studentName,
           Email: sub.studentEmail || '',
           Nota: '',
@@ -1141,7 +1147,7 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
     // Hoja principal
     const ws = XLSX.utils.json_to_sheet(excelRows);
     ws['!cols'] = [
-      { wch: 32 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
+      { wch: 28 }, { wch: 34 }, { wch: 32 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
       { wch: 60 }, { wch: 50 }, { wch: 50 }, { wch: 60 }, { wch: 30 },
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Correcciones');
@@ -1153,6 +1159,8 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
         ? corrected.reduce((s, r) => s + r.Nota, 0) / corrected.length
         : 0;
     const summaryData = [
+      { Métrica: 'Curso', Valor: courseName },
+      { Métrica: 'Tarea', Valor: taskName },
       { Métrica: 'Total alumnos', Valor: submissions.length },
       { Métrica: 'Entregas corregidas', Valor: corrected.length },
       { Métrica: 'Sin entrega', Valor: noSubmission.length },
@@ -1274,7 +1282,7 @@ app.post('/api/save-correction', express.json({ limit: '10mb' }), async (req, re
 });
 
 app.post('/api/finalize-corrections', express.json({ limit: '10mb' }), async (req, res) => {
-  const { dirName, rows, totalSubmissions } = req.body;
+  const { dirName, rows, totalSubmissions, courseName = '', taskName = '' } = req.body;
   if (!dirName || !rows) return res.status(400).json({ error: 'Faltan parámetros' });
   try {
     const outputDir = path.join(__dirname, 'correcciones', dirName);
@@ -1284,7 +1292,7 @@ app.post('/api/finalize-corrections', express.json({ limit: '10mb' }), async (re
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(sorted);
     ws['!cols'] = [
-      { wch: 32 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
+      { wch: 28 }, { wch: 34 }, { wch: 32 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
       { wch: 60 }, { wch: 50 }, { wch: 50 }, { wch: 60 }, { wch: 30 },
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Correcciones');
@@ -1292,6 +1300,8 @@ app.post('/api/finalize-corrections', express.json({ limit: '10mb' }), async (re
     const corrected = sorted.filter(r => typeof r.Nota === 'number');
     const avg = corrected.length > 0 ? corrected.reduce((s, r) => s + r.Nota, 0) / corrected.length : 0;
     const summaryData = [
+      { Métrica: 'Curso', Valor: courseName || '—' },
+      { Métrica: 'Tarea', Valor: taskName || '—' },
       { Métrica: 'Total alumnos', Valor: totalSubmissions || sorted.length },
       { Métrica: 'Entregas corregidas', Valor: corrected.length },
       { Métrica: 'Sin entrega / Error', Valor: (totalSubmissions || sorted.length) - corrected.length },

@@ -1318,6 +1318,8 @@ async function startCorrection() {
 
       const nota = correction.nota !== null && correction.nota !== undefined ? Number(correction.nota) : '';
       excelRows.push({
+        Curso: courseName,
+        Tarea: taskName,
         Alumno: studentName,
         Email: studentEmail || '',
         Nota: nota,
@@ -1335,6 +1337,8 @@ async function startCorrection() {
       console.error(`Error con ${sub.studentName}:`, err);
       addResultItem('error', sub.studentName, null, err.message, null);
       excelRows.push({
+        Curso: courseName,
+        Tarea: taskName,
         Alumno: sub.studentName, Email: sub.studentEmail || '',
         Nota: '', Estado: 'Error', 'Entregado tarde': sub.late ? 'Sí' : 'No',
         'Evaluación general': `Error: ${err.message}`,
@@ -1355,7 +1359,7 @@ async function startCorrection() {
     const finalRes = await fetch('/api/finalize-corrections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dirName, rows: excelRows, totalSubmissions: selected.length }),
+      body: JSON.stringify({ dirName, rows: excelRows, totalSubmissions: selected.length, courseName, taskName }),
     });
     const finalData = await finalRes.json().catch(() => ({}));
     if (!finalRes.ok) {
