@@ -258,6 +258,16 @@ app.post('/api/config', express.json(), (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/api/ai-config', (req, res) => {
+  const provider = getProvider();
+  const key = provider === 'groq' ? getGroqKey() : getGeminiKey();
+  res.json({
+    provider,
+    key,          // the actual API key — acceptable for personal teacher tool
+    groqModel: getGroqModel(),
+  });
+});
+
 // ============================================================
 //  DIAGNÓSTICO: listar cursos del usuario
 // ============================================================
@@ -1135,6 +1145,124 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
 
   clearInterval(keepAlive);
   res.end();
+});
+
+// ============================================================
+//  BROWSER-SIDE AI — ENDPOINTS DE SOPORTE
+// ============================================================
+
+app.post('/api/student-files', express.json({ limit: '2mb' }), async (req, res) => {
+  if (!oauth2Client.credentials?.access_token) return res.status(401).json({ error: 'No autenticado con Google' });
+  const { submission } = req.body;
+  if (!submission) return res.status(400).json({ error: 'Falta submission' });
+
+  let studentName = submission.studentName || 'Alumno';
+  let studentEmail = submission.studentEmail || '';
+  const files = [];
+
+  for (const df of (submission.driveFiles || [])) {
+    try {
+      const file = await downloadDriveFile(df.id);
+
+      // Update student name from file owner if generic
+      if (isGenericName(studentName) && file.ownerName) {
+        studentName = file.ownerName;
+        if (file.ownerEmail && !studentEmail) studentEmail = file.ownerEmail;
+      }
+
+      let buf = file.buffer;
+      let mime = file.mimeType;
+
+      // Compress images
+      if (mime.startsWith('image/')) {
+        const c = await compressImage(buf, mime);
+        buf = c.buffer;
+        mime = c.mimeType;
+      }
+
+      const entry = { name: file.name, mimeType: mime, dataBase64: buf.toString('base64') };
+
+      // For PDFs: also extract text (Groq doesn't support PDFs natively)
+      if (mime === 'application/pdf') {
+        const text = await extractPdfText(buf);
+        if (text) entry.extractedText = text;
+      }
+
+      files.push(entry);
+    } catch (e) {
+      console.warn(`No se pudo descargar ${df.title || df.id}:`, e.message);
+    }
+  }
+
+  res.json({ studentName, studentEmail, files });
+});
+
+app.post('/api/save-correction', express.json({ limit: '512kb' }), async (req, res) => {
+  const { dirName, studentName, taskName, courseName, correction } = req.body;
+  if (!dirName || !studentName || !correction) {
+    return res.status(400).json({ error: 'Faltan parámetros' });
+  }
+  try {
+    const outputDir = path.join(__dirname, 'correcciones', dirName);
+    await fsp.mkdir(outputDir, { recursive: true });
+    const htmlFilename = `${sanitizeFilename(studentName)}.html`;
+    const htmlPath = path.join(outputDir, htmlFilename);
+    const date = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
+    await fsp.writeFile(
+      htmlPath,
+      generateCorrectionHTML(studentName, taskName, courseName, correction, date),
+      'utf-8'
+    );
+    res.json({ htmlFile: `correcciones/${dirName}/${htmlFilename}`, htmlFilename });
+  } catch (e) {
+    console.error('save-correction error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/finalize-corrections', express.json({ limit: '2mb' }), async (req, res) => {
+  const { dirName, rows, totalSubmissions } = req.body;
+  if (!dirName || !rows) return res.status(400).json({ error: 'Faltan parámetros' });
+  try {
+    const outputDir = path.join(__dirname, 'correcciones', dirName);
+    await fsp.mkdir(outputDir, { recursive: true });
+
+    const sorted = [...rows].sort((a, b) => a.Alumno.localeCompare(b.Alumno, 'es'));
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(sorted);
+    ws['!cols'] = [
+      { wch: 32 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 14 },
+      { wch: 60 }, { wch: 50 }, { wch: 50 }, { wch: 60 }, { wch: 30 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Correcciones');
+
+    const corrected = sorted.filter(r => typeof r.Nota === 'number');
+    const avg = corrected.length > 0 ? corrected.reduce((s, r) => s + r.Nota, 0) / corrected.length : 0;
+    const summaryData = [
+      { Métrica: 'Total alumnos', Valor: totalSubmissions || sorted.length },
+      { Métrica: 'Entregas corregidas', Valor: corrected.length },
+      { Métrica: 'Sin entrega / Error', Valor: (totalSubmissions || sorted.length) - corrected.length },
+      { Métrica: 'Nota media', Valor: avg.toFixed(2) },
+      { Métrica: 'Nota más alta', Valor: corrected.length > 0 ? Math.max(...corrected.map(r => r.Nota)) : '—' },
+      { Métrica: 'Nota más baja', Valor: corrected.length > 0 ? Math.min(...corrected.map(r => r.Nota)) : '—' },
+      { Métrica: 'Aprobados (≥5)', Valor: corrected.filter(r => r.Nota >= 5).length },
+      { Métrica: 'Suspensos (<5)', Valor: corrected.filter(r => r.Nota < 5).length },
+    ];
+    const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+    wsSummary['!cols'] = [{ wch: 25 }, { wch: 15 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Resumen estadístico');
+
+    const excelPath = path.join(outputDir, 'correcciones.xlsx');
+    XLSX.writeFile(wb, excelPath);
+
+    res.json({
+      excelFile: `correcciones/${dirName}/correcciones.xlsx`,
+      outputDir: `correcciones/${dirName}`,
+    });
+  } catch (e) {
+    console.error('finalize-corrections error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ============================================================

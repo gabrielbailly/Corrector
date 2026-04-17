@@ -922,6 +922,178 @@ function updateStep3Summary() {
 }
 
 // ================================================================
+//  CLIENT-SIDE AI HELPERS
+// ================================================================
+
+/** Read a File object and return its content as base64 string (no data: prefix) */
+async function fileToBase64Data(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Build Gemini `parts` array from prompt + files */
+function buildGeminiParts(prompt, files) {
+  const parts = [{ text: prompt }];
+  for (const f of files) {
+    if (f.mimeType.startsWith('image/') || f.mimeType === 'application/pdf') {
+      parts.push({ inline_data: { mime_type: f.mimeType, data: f.dataBase64 } });
+    } else if (f.mimeType === 'text/plain') {
+      try { parts.push({ text: `\n--- ${f.name} ---\n${atob(f.dataBase64)}` }); } catch (e) {}
+    }
+  }
+  return parts;
+}
+
+/** Build Groq OpenAI-format content array from prompt + files */
+function buildGroqContent(prompt, files) {
+  const content = [{ type: 'text', text: prompt }];
+  for (const f of files) {
+    if (f.mimeType.startsWith('image/')) {
+      content.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.dataBase64}` } });
+    } else if (f.mimeType === 'text/plain') {
+      try { content.push({ type: 'text', text: `\n--- ${f.name} ---\n${atob(f.dataBase64)}` }); } catch (e) {}
+    } else if (f.mimeType === 'application/pdf' && f.extractedText) {
+      content.push({ type: 'text', text: `\n--- ${f.name} (texto extraído) ---\n${f.extractedText}` });
+    }
+  }
+  return content;
+}
+
+/** Build the correction prompt (mirrors server-side buildPrompt) */
+function buildPromptClient(taskName, courseName, instructions, numRef, numStudent) {
+  let p = `Eres un profesor experto. Debes corregir la entrega del alumno para la tarea "${taskName}" del curso "${courseName}".\n\n`;
+  if (numRef > 0) {
+    p += `Los primeros ${numRef} archivo(s) adjunto(s) son el MATERIAL DE REFERENCIA del profesor (rúbrica, solución, criterios de evaluación).\nLos siguientes ${numStudent} archivo(s) son la ENTREGA DEL ALUMNO.\n\n`;
+  } else {
+    p += `Los ${numStudent} archivo(s) adjunto(s) son la ENTREGA DEL ALUMNO. Corrígela con criterio pedagógico.\n\n`;
+  }
+  if (instructions && instructions.trim()) {
+    p += `INSTRUCCIONES ESPECÍFICAS DEL PROFESOR:\n${instructions.trim()}\n\n`;
+  }
+  p += `Analiza el trabajo minuciosamente y responde ÚNICAMENTE con un objeto JSON con esta estructura exacta:
+
+{
+  "nota": <número decimal entre 0.0 y 10.0>,
+  "nota_justificacion": "<justificación breve de la nota>",
+  "evaluacion_general": "<párrafo de evaluación general del trabajo>",
+  "puntos_fuertes": ["<punto 1>", "<punto 2>", ...],
+  "aspectos_mejora": ["<aspecto 1>", "<aspecto 2>", ...],
+  "errores_graves": ["<error importante>", ...],
+  "correccion_detallada": "<análisis detallado sección por sección o pregunta por pregunta>",
+  "feedforward": "<recomendaciones concretas y accionables para mejorar>"
+}
+
+REGLAS IMPORTANTES:
+- "nota" debe ser un número (ej: 7.5), no una cadena
+- Si el trabajo no puede evaluarse, "nota" debe ser null
+- Sé específico, constructivo y motivador
+- Responde SIEMPRE en español
+- Responde ÚNICAMENTE con el JSON, sin texto antes ni después`;
+  return p;
+}
+
+const _sleepBrowser = ms => new Promise(r => setTimeout(r, ms));
+let _lastGeminiBrowserCall = 0;
+
+/** Call Gemini REST API directly from the browser */
+async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
+  const MAX_ATTEMPTS = 5;
+  // Proactive throttle: ≥4s between calls
+  if (attempt === 1) {
+    const gap = Date.now() - _lastGeminiBrowserCall;
+    if (gap < 4000) await _sleepBrowser(4000 - gap);
+  }
+  _lastGeminiBrowserCall = Date.now();
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+      }),
+    }
+  );
+
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get('retry-after') || '0');
+    if (retryAfter > 300) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter / 60)} min.`);
+    const waitSec = Math.max(retryAfter || 0, 90);
+    if (attempt <= MAX_ATTEMPTS) {
+      if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
+      await _sleepBrowser(waitSec * 1000);
+      _lastGeminiBrowserCall = Date.now();
+      return callGeminiBrowser(key, parts, attempt + 1, onRetry);
+    }
+    throw new Error(`Límite de Gemini alcanzado tras ${MAX_ATTEMPTS} intentos.`);
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`Gemini ${res.status}: ${body.error?.message || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Respuesta vacía de Gemini');
+  try { return JSON.parse(text); }
+  catch (e) {
+    const m = text.match(/```json\n?([\s\S]+?)\n?```/);
+    if (m) return JSON.parse(m[1]);
+    return { raw: text, nota: null };
+  }
+}
+
+/** Call Groq API directly from the browser */
+async function callGroqBrowser(key, model, content, attempt = 1, onRetry = null) {
+  const MAX_ATTEMPTS = 4;
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content }],
+      response_format: { type: 'json_object' },
+      temperature: 0.4,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get('retry-after') || '0');
+    if (retryAfter > 60) throw new Error(`Cuota diaria de Groq agotada. Reinicia en ~${Math.ceil(retryAfter / 60)} min.`);
+    const waitSec = retryAfter || 10 * attempt;
+    if (attempt <= MAX_ATTEMPTS) {
+      if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
+      await _sleepBrowser(waitSec * 1000);
+      return callGroqBrowser(key, model, content, attempt + 1, onRetry);
+    }
+    throw new Error(`Límite de Groq alcanzado tras ${MAX_ATTEMPTS} intentos.`);
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`Groq ${res.status}: ${body.error?.message || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content;
+  if (!text) throw new Error('Respuesta vacía de Groq');
+  try { return JSON.parse(text); }
+  catch (e) {
+    const m = text.match(/```json\n?([\s\S]+?)\n?```/);
+    if (m) return JSON.parse(m[1]);
+    return { raw: text, nota: null };
+  }
+}
+
+// ================================================================
 //  START CORRECTION
 // ================================================================
 async function startCorrection() {
@@ -935,46 +1107,140 @@ async function startCorrection() {
   markStepDone(3);
   activateStep(4);
 
-  // Build FormData
-  const fd = new FormData();
-  fd.append('courseId', state.task.courseId);
-  fd.append('courseWorkId', state.task.courseWorkId);
-  fd.append('taskName', state.task.task);
-  fd.append('courseName', state.task.course);
-  fd.append('instructions', document.getElementById('instructions').value);
-  fd.append('submissionsJson', JSON.stringify(selected));
-  state.refFiles.forEach(f => fd.append('referenceFiles', f));
-
-  // SSE via fetch (streaming)
+  // Get AI config from server (provider + key)
+  let aiCfg;
   try {
-    const response = await fetch('/api/correct', { method: 'POST', body: fd });
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      // Parse SSE events from buffer
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop(); // keep incomplete last part
-
-      for (const part of parts) {
-        const lines = part.split('\n');
-        let event = 'message', data = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) event = line.slice(7).trim();
-          if (line.startsWith('data: ')) data = line.slice(6).trim();
-        }
-        if (data) {
-          try { handleSSEEvent(event, JSON.parse(data)); } catch (e) {}
-        }
-      }
-    }
+    const r = await fetch('/api/ai-config');
+    aiCfg = await r.json();
   } catch (e) {
-    addResultItem('error', '⚠️ Error de conexión', '', e.message, null);
+    addResultItem('error', 'Error', null, 'No se pudo obtener configuración de IA: ' + e.message, null);
+    return;
+  }
+  if (!aiCfg.key) {
+    addResultItem('error', 'Configuración', null,
+      `Falta la API Key de ${aiCfg.provider === 'groq' ? 'Groq' : 'Gemini'}. Configúrala en ⚙️ Ajustes.`, null);
+    return;
+  }
+
+  const taskName  = state.task.task;
+  const courseName = state.task.course;
+  const courseId   = state.task.courseId;
+  const courseWorkId = state.task.courseWorkId;
+  const instructions = document.getElementById('instructions').value;
+  const dirName = `${courseId}_${courseWorkId}`;
+
+  // Read teacher reference files as base64 (they're File objects in state.refFiles)
+  const refFiles = await Promise.all((state.refFiles || []).map(async f => ({
+    name: f.name,
+    mimeType: f.type,
+    dataBase64: await fileToBase64Data(f),
+  })));
+
+  updateProgress(0, selected.length, `Iniciando corrección de ${selected.length} entregas…`);
+
+  const excelRows = [];
+  let correctedCount = 0, errorCount = 0;
+  const sleepMs = ms => new Promise(r => setTimeout(r, ms));
+
+  for (let i = 0; i < selected.length; i++) {
+    const sub = selected[i];
+    updateProgress(i, selected.length, `Descargando archivos de ${sub.studentName}…`, sub.studentName);
+
+    try {
+      // 1. Download student files from server (Drive → base64)
+      const filesRes = await fetch('/api/student-files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ submission: sub }),
+      });
+      if (!filesRes.ok) {
+        const err = await filesRes.json().catch(() => ({}));
+        throw new Error(err.error || `Error del servidor: ${filesRes.status}`);
+      }
+      const { studentName, studentEmail, files: studentFiles } = await filesRes.json();
+
+      if (!studentFiles.length) throw new Error('No se pudieron descargar los archivos de la entrega');
+
+      const allFiles = [...refFiles, ...studentFiles];
+      const prompt = buildPromptClient(taskName, courseName, instructions, refFiles.length, studentFiles.length);
+      const providerLabel = aiCfg.provider === 'gemini' ? 'Gemini' : 'Groq';
+
+      updateProgress(i, selected.length, `Corrigiendo a ${studentName} con ${providerLabel} IA…`, studentName);
+
+      // 2. Call AI directly from browser (no Render proxy involved)
+      let correction;
+      const onRetry = ({ attempt, max, wait }) => startRetryCountdown(wait, attempt, max);
+
+      if (aiCfg.provider === 'gemini') {
+        const parts = buildGeminiParts(prompt, allFiles);
+        correction = await callGeminiBrowser(aiCfg.key, parts, 1, onRetry);
+      } else {
+        const content = buildGroqContent(prompt, allFiles);
+        correction = await callGroqBrowser(aiCfg.key, aiCfg.groqModel, content, 1, onRetry);
+      }
+
+      // 3. Save HTML on server
+      const saveRes = await fetch('/api/save-correction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dirName, studentName, studentEmail, taskName, courseName, correction }),
+      });
+      const saved = await saveRes.json();
+
+      addResultItem('done', studentName, correction.nota, correction.evaluacion_general, saved.htmlFile);
+
+      const nota = correction.nota !== null && correction.nota !== undefined ? Number(correction.nota) : '';
+      excelRows.push({
+        Alumno: studentName,
+        Email: studentEmail || '',
+        Nota: nota,
+        Estado: sub.state === 'TURNED_IN' ? 'Entregado' : (sub.state || ''),
+        'Entregado tarde': sub.late ? 'Sí' : 'No',
+        'Evaluación general': correction.evaluacion_general || '',
+        'Puntos fuertes': (correction.puntos_fuertes || []).join('; '),
+        'Aspectos a mejorar': (correction.aspectos_mejora || []).join('; '),
+        Feedforward: correction.feedforward || '',
+        'Archivo HTML': saved.htmlFilename || '',
+      });
+      correctedCount++;
+
+    } catch (err) {
+      console.error(`Error con ${sub.studentName}:`, err);
+      addResultItem('error', sub.studentName, null, err.message, null);
+      excelRows.push({
+        Alumno: sub.studentName, Email: sub.studentEmail || '',
+        Nota: '', Estado: 'Error', 'Entregado tarde': sub.late ? 'Sí' : 'No',
+        'Evaluación general': `Error: ${err.message}`,
+        'Puntos fuertes': '', 'Aspectos a mejorar': '', Feedforward: '', 'Archivo HTML': '',
+      });
+      errorCount++;
+    }
+
+    // Always pause between students to respect rate limits
+    if (i < selected.length - 1) {
+      await sleepMs(aiCfg.provider === 'gemini' ? 3000 : 1500);
+    }
+  }
+
+  // 4. Generate Excel on server
+  updateProgress(selected.length, selected.length, 'Generando Excel con todas las correcciones…');
+  try {
+    const finalRes = await fetch('/api/finalize-corrections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dirName, rows: excelRows, totalSubmissions: selected.length }),
+    });
+    const finalData = await finalRes.json();
+    updateProgress(100, 1, '¡Corrección completada!');
+    const notes = excelRows.filter(r => typeof r.Nota === 'number');
+    const avg = notes.length ? (notes.reduce((s, r) => s + r.Nota, 0) / notes.length).toFixed(2) : '0.00';
+    showResults({
+      stats: { total: selected.length, corrected: correctedCount, noSubmission: 0, errors: errorCount, average: avg },
+      excelFile: finalData.excelFile,
+      outputDir: finalData.outputDir,
+    });
+  } catch (e) {
+    addResultItem('error', 'Excel', null, 'Error generando Excel: ' + e.message, null);
   }
 }
 
