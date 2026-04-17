@@ -230,22 +230,45 @@ textarea{resize:vertical;min-height:90px}
 <!-- ===== SETTINGS DRAWER ===== -->
 <div id="settings-drawer" class="hidden" style="background:#1e3a8a;color:#fff;padding:1rem 1.5rem;border-bottom:2px solid #3b82f6">
   <div style="max-width:860px;margin:0 auto">
-    <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">⚙️ Configuración — API Key de Groq</div>
-    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+    <div style="font-weight:700;margin-bottom:.75rem;font-size:.95rem">⚙️ Configuración de IA</div>
+    <div style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:.75rem">
+      <div>
+        <label style="font-size:.78rem;opacity:.8;display:block;margin-bottom:.3rem">Proveedor de IA</label>
+        <select id="provider-select" onchange="toggleProviderFields()"
+          style="padding:.6rem .875rem;border-radius:.4rem;border:none;font-size:.9rem;background:rgba(255,255,255,.2);color:#fff;font-weight:600">
+          <option value="gemini">✦ Gemini (recomendado — 1500 req/día gratis)</option>
+          <option value="groq">⚡ Groq (rápido — cuota limitada)</option>
+        </select>
+      </div>
+    </div>
+    <!-- Gemini fields -->
+    <div id="fields-gemini" style="display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
       <div style="flex:1;min-width:260px">
         <label style="font-size:.78rem;opacity:.8;display:block;margin-bottom:.3rem">
-          API Key de Groq
-          (<a href="https://console.groq.com/keys" target="_blank" style="color:#93c5fd">obtener gratis en console.groq.com</a>)
+          API Key de Gemini
+          (<a href="https://aistudio.google.com/apikey" target="_blank" style="color:#93c5fd">obtener gratis en aistudio.google.com</a>)
         </label>
-        <input type="password" id="groq-key-input" placeholder="gsk_xxxxxxxxxxxxxxxxxxxx"
+        <input type="password" id="gemini-key-input" placeholder="AIzaSy…"
           style="width:100%;padding:.6rem .875rem;border-radius:.4rem;border:none;font-size:.875rem;background:rgba(255,255,255,.15);color:#fff;outline:none">
       </div>
-      <div style="min-width:180px">
+      <button class="btn btn-green" onclick="saveSettings()" style="white-space:nowrap">Guardar</button>
+    </div>
+    <!-- Groq fields -->
+    <div id="fields-groq" style="display:none;gap:.75rem;align-items:flex-end;flex-wrap:wrap">
+      <div style="flex:1;min-width:240px">
+        <label style="font-size:.78rem;opacity:.8;display:block;margin-bottom:.3rem">
+          API Key de Groq
+          (<a href="https://console.groq.com/keys" target="_blank" style="color:#93c5fd">console.groq.com</a>)
+        </label>
+        <input type="password" id="groq-key-input" placeholder="gsk_…"
+          style="width:100%;padding:.6rem .875rem;border-radius:.4rem;border:none;font-size:.875rem;background:rgba(255,255,255,.15);color:#fff;outline:none">
+      </div>
+      <div style="min-width:220px">
         <label style="font-size:.78rem;opacity:.8;display:block;margin-bottom:.3rem">Modelo</label>
         <select id="groq-model-select"
           style="width:100%;padding:.6rem .875rem;border-radius:.4rem;border:none;font-size:.85rem;background:rgba(255,255,255,.15);color:#fff">
-          <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout (único con visión en Groq)</option>
-          <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick (más potente)</option>
+          <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout</option>
+          <option value="meta-llama/llama-4-maverick-17b-128e-instruct">Llama 4 Maverick</option>
         </select>
       </div>
       <button class="btn btn-green" onclick="saveSettings()" style="white-space:nowrap">Guardar</button>
@@ -507,13 +530,24 @@ async function checkConfig() {
 function updateGroqPill(cfg) {
   const pill = document.getElementById('groq-status-pill');
   if (!pill) return;
-  if (cfg.hasGroqKey) {
-    pill.textContent = `✅ Groq ${cfg.groqKeyPreview}`;
+  const hasKey = cfg.provider === 'groq' ? cfg.hasGroqKey : cfg.hasGeminiKey;
+  const providerLabel = cfg.provider === 'groq' ? 'Groq' : 'Gemini';
+  const keyPreview = cfg.provider === 'groq' ? cfg.groqKeyPreview : cfg.geminiKeyPreview;
+  if (hasKey) {
+    pill.textContent = `✅ ${providerLabel} ${keyPreview}`;
   } else {
-    pill.textContent = '⚠️ Configura Groq';
-    // Abrir ajustes automáticamente si no hay key
+    pill.textContent = `⚠️ Configura ${providerLabel}`;
     document.getElementById('settings-drawer').classList.remove('hidden');
   }
+  // Sincronizar selector
+  const sel = document.getElementById('provider-select');
+  if (sel && cfg.provider) { sel.value = cfg.provider; toggleProviderFields(); }
+}
+
+function toggleProviderFields() {
+  const provider = document.getElementById('provider-select')?.value;
+  document.getElementById('fields-gemini').style.display = provider === 'gemini' ? 'flex' : 'none';
+  document.getElementById('fields-groq').style.display   = provider === 'groq'   ? 'flex' : 'none';
 }
 
 function toggleSettings() {
@@ -521,17 +555,21 @@ function toggleSettings() {
 }
 
 async function saveSettings() {
-  const key   = document.getElementById('groq-key-input').value.trim();
-  const model = document.getElementById('groq-model-select').value;
-  const msg   = document.getElementById('settings-msg');
+  const provider   = document.getElementById('provider-select').value;
+  const geminiKey  = document.getElementById('gemini-key-input').value.trim();
+  const groqKey    = document.getElementById('groq-key-input').value.trim();
+  const groqModel  = document.getElementById('groq-model-select').value;
+  const msg        = document.getElementById('settings-msg');
 
-  if (!key && !model) { msg.textContent = 'Introduce al menos la API Key.'; return; }
+  const body = { aiProvider: provider, groqModel };
+  if (geminiKey) body.geminiApiKey = geminiKey;
+  if (groqKey)   body.groqApiKey   = groqKey;
 
   try {
     const r = await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groqApiKey: key || undefined, groqModel: model }),
+      body: JSON.stringify(body),
     });
     const d = await r.json();
     if (d.success) {

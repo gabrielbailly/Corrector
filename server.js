@@ -37,9 +37,13 @@ function getGroqKey() {
   // Prioridad: variable de entorno (Railway) > config.json (local)
   return process.env.GROQ_API_KEY || appConfig.groqApiKey || '';
 }
-
-// Modelo Groq con visión — se puede cambiar desde la UI
-// Único modelo de visión disponible en Groq actualmente
+function getGeminiKey() {
+  return process.env.GEMINI_API_KEY || appConfig.geminiApiKey || '';
+}
+function getProvider() {
+  return process.env.AI_PROVIDER || appConfig.aiProvider || 'gemini';
+}
+// Groq: único modelo de visión disponible actualmente
 const GROQ_MODEL_DEFAULT = 'meta-llama/llama-4-scout-17b-16e-instruct';
 function getGroqModel() {
   return appConfig.groqModel || GROQ_MODEL_DEFAULT;
@@ -232,18 +236,24 @@ function sanitizeFilename(name) {
 //  CONFIGURACIÓN (API Keys)
 // ============================================================
 app.get('/api/config', (req, res) => {
-  const key = getGroqKey();
+  const groqKey    = getGroqKey();
+  const geminiKey  = getGeminiKey();
   res.json({
-    hasGroqKey: !!key,
-    groqKeyPreview: key ? `${key.slice(0, 6)}…${key.slice(-4)}` : '',
-    groqModel: getGroqModel(),
+    provider:        getProvider(),
+    hasGroqKey:      !!groqKey,
+    groqKeyPreview:  groqKey   ? `${groqKey.slice(0,6)}…${groqKey.slice(-4)}`   : '',
+    hasGeminiKey:    !!geminiKey,
+    geminiKeyPreview:geminiKey ? `${geminiKey.slice(0,6)}…${geminiKey.slice(-4)}` : '',
+    groqModel:       getGroqModel(),
   });
 });
 
 app.post('/api/config', express.json(), (req, res) => {
-  const { groqApiKey, groqModel } = req.body;
-  if (groqApiKey && groqApiKey.trim()) appConfig.groqApiKey = groqApiKey.trim();
-  if (groqModel && groqModel.trim()) appConfig.groqModel = groqModel.trim();
+  const { groqApiKey, geminiApiKey, aiProvider, groqModel } = req.body;
+  if (groqApiKey   !== undefined) appConfig.groqApiKey   = groqApiKey.trim();
+  if (geminiApiKey !== undefined) appConfig.geminiApiKey = geminiApiKey.trim();
+  if (aiProvider   !== undefined) appConfig.aiProvider   = aiProvider;
+  if (groqModel    !== undefined) appConfig.groqModel    = groqModel.trim();
   saveConfig();
   res.json({ success: true });
 });
@@ -599,6 +609,70 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
 }
 
 // ============================================================
+//  GEMINI API  (gemini-2.0-flash — 1500 req/día gratis, soporta PDF nativo)
+// ============================================================
+async function callGemini(prompt, files, attempt = 1, onRetry = null) {
+  const MAX_ATTEMPTS = 4;
+  const key = getGeminiKey();
+  if (!key) throw new Error('Falta la API Key de Gemini. Configúrala en ⚙️ Ajustes.');
+
+  const parts = [{ text: prompt }];
+
+  for (const file of files) {
+    if (file.mimeType.startsWith('image/')) {
+      const { buffer: imgBuf, mimeType: imgMime } = await compressImage(file.buffer, file.mimeType);
+      parts.push({ inline_data: { mime_type: imgMime, data: imgBuf.toString('base64') } });
+    } else if (file.mimeType === 'application/pdf') {
+      // Gemini soporta PDF nativo — no hace falta extraer texto
+      parts.push({ inline_data: { mime_type: 'application/pdf', data: file.buffer.toString('base64') } });
+    } else if (file.mimeType === 'text/plain') {
+      parts.push({ text: `\n--- ${file.name} ---\n${file.buffer.toString('utf8')}` });
+    }
+  }
+
+  try {
+    const res = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      {
+        contents: [{ role: 'user', parts }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+      },
+      { timeout: 120000 }
+    );
+    const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Respuesta vacía de Gemini');
+    try { return JSON.parse(text); }
+    catch (e) {
+      const m = text.match(/```json\n?([\s\S]+?)\n?```/);
+      if (m) return JSON.parse(m[1]);
+      return { raw: text, nota: null };
+    }
+  } catch (err) {
+    const status = err.response?.status;
+    if (status === 429 && attempt <= MAX_ATTEMPTS) {
+      const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0');
+      if (retryAfter > 90) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter/60)} min.`);
+      const waitSec = retryAfter > 0 ? retryAfter : 15 * attempt;
+      if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
+      await sleep(waitSec * 1000);
+      return callGemini(prompt, files, attempt + 1, onRetry);
+    }
+    if (status === 401) throw new Error('API Key de Gemini inválida. Revisa la configuración.');
+    const msg = err.response?.data?.error?.message || err.message;
+    throw new Error(`Error de Gemini: ${msg}`);
+  }
+}
+
+// ============================================================
+//  LLAMADA UNIFICADA — delega a Gemini o Groq según config
+// ============================================================
+async function callAI(prompt, files, onRetry = null) {
+  const provider = getProvider();
+  if (provider === 'groq') return callGroq(prompt, files, 1, onRetry);
+  return callGemini(prompt, files, 1, onRetry);
+}
+
+// ============================================================
 //  PROMPT DE CORRECCIÓN
 // ============================================================
 function buildPrompt(taskName, courseName, instructions, numRef, numStudent) {
@@ -908,7 +982,7 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
           studentFiles.length
         );
         const allFiles = [...referenceFiles, ...studentFiles];
-        const correction = await callGroq(prompt, allFiles, 1, ({ attempt, max, wait }) => {
+        const correction = await callAI(prompt, allFiles, ({ attempt, max, wait }) => {
           send('retry', { student: sub.studentName, attempt, max, wait });
         });
 
@@ -943,8 +1017,8 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
           summary: (correction.evaluacion_general || '').substring(0, 160),
         });
 
-        // Groq es muy rápido — pausa breve entre alumnos
-        if (i < toCorrect.length - 1) await sleep(2000);
+        // Pausa entre alumnos: Gemini 15 RPM → 5s seguros; Groq es más permisivo
+        if (i < toCorrect.length - 1) await sleep(getProvider() === 'gemini' ? 5000 : 2000);
 
       } catch (err) {
         console.error(`Error con ${sub.studentName}:`, err.message);
