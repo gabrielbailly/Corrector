@@ -1002,6 +1002,8 @@ let _lastGeminiBrowserCall = 0;
 /** Call Gemini REST API directly from the browser */
 async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
   const MAX_ATTEMPTS = 5;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 95000);
   // Proactive throttle: ≥4s between calls
   if (attempt === 1) {
     const gap = Date.now() - _lastGeminiBrowserCall;
@@ -1009,20 +1011,33 @@ async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
   }
   _lastGeminiBrowserCall = Date.now();
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
-      }),
+  let res;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
+        }),
+      }
+    );
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error('Gemini tardó demasiado en responder. Prueba con menos archivos o vuelve a intentarlo.');
     }
-  );
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (res.status === 429) {
     const retryAfter = parseInt(res.headers.get('retry-after') || '0');
+    const body = await res.json().catch(() => ({}));
+    const apiMsg = body.error?.message || 'Límite temporal de Gemini';
     if (retryAfter > 300) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter / 60)} min.`);
     const waitSec = Math.max(retryAfter || 0, 90);
     if (attempt <= MAX_ATTEMPTS) {
@@ -1031,7 +1046,7 @@ async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
       _lastGeminiBrowserCall = Date.now();
       return callGeminiBrowser(key, parts, attempt + 1, onRetry);
     }
-    throw new Error(`Límite de Gemini alcanzado tras ${MAX_ATTEMPTS} intentos.`);
+    throw new Error(`${apiMsg}. Límite de Gemini alcanzado tras ${MAX_ATTEMPTS} intentos.`);
   }
 
   if (!res.ok) {
@@ -1040,8 +1055,14 @@ async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
   }
 
   const data = await res.json();
+  if (data.promptFeedback?.blockReason) {
+    throw new Error(`Gemini bloqueó la solicitud: ${data.promptFeedback.blockReason}`);
+  }
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Respuesta vacía de Gemini');
+  if (!text) {
+    const finishReason = data.candidates?.[0]?.finishReason;
+    throw new Error(`Respuesta vacía de Gemini${finishReason ? ` (${finishReason})` : ''}`);
+  }
   try { return JSON.parse(text); }
   catch (e) {
     const m = text.match(/```json\n?([\s\S]+?)\n?```/);

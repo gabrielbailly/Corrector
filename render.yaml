@@ -9,6 +9,8 @@ services:
         value: production
       - key: GROQ_API_KEY
         sync: false          # se rellena manualmente en Render
+      - key: GEMINI_API_KEY
+        sync: false          # se rellena manualmente en Render
       - key: REDIRECT_URI
         sync: false          # https://TU-APP.onrender.com/auth/callback
       - key: GOOGLE_CREDENTIALS
