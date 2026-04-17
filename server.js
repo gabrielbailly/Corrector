@@ -493,13 +493,15 @@ async function compressImage(buffer, mimeType) {
   if (!sharp) return { buffer, mimeType };
   try {
     const sizeMB = buffer.length / 1024 / 1024;
-    // Solo comprimir si pasa de 1 MB
-    if (sizeMB <= 1) return { buffer, mimeType };
+    // Comprimir siempre: reduce tokens y evita límites TPM de Gemini.
+    // Solo saltamos si ya es muy pequeña (< 100 KB) y es JPEG/PNG.
+    const alreadyTiny = sizeMB < 0.1 && (mimeType === 'image/jpeg' || mimeType === 'image/png');
+    if (alreadyTiny) return { buffer, mimeType };
     const compressed = await sharp(buffer)
-      .resize({ width: 1200, height: 1200, fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 82 })
+      .resize({ width: 1024, height: 1024, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 72 })
       .toBuffer();
-    console.log(`Imagen comprimida: ${sizeMB.toFixed(1)} MB → ${(compressed.length/1024/1024).toFixed(1)} MB`);
+    console.log(`Imagen comprimida: ${sizeMB.toFixed(2)} MB → ${(compressed.length/1024/1024).toFixed(2)} MB`);
     return { buffer: compressed, mimeType: 'image/jpeg' };
   } catch (e) {
     console.warn('Error comprimiendo imagen:', e.message);
@@ -609,10 +611,16 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
 }
 
 // ============================================================
-//  GEMINI API  (gemini-2.0-flash — 1500 req/día gratis, soporta PDF nativo)
+//  GEMINI API  (gemini-2.0-flash-lite — 30 RPM gratis, soporta PDF nativo)
 // ============================================================
+
+// Proactive rate-limiter: ensures at least MIN_GAP_MS between consecutive
+// Gemini requests so we don't burst into the 30 RPM limit.
+let lastGeminiCallAt = 0;
+const GEMINI_MIN_GAP_MS = 4000; // conservative: ≤15 req/min
+
 async function callGemini(prompt, files, attempt = 1, onRetry = null) {
-  const MAX_ATTEMPTS = 4;
+  const MAX_ATTEMPTS = 5;
   const key = getGeminiKey();
   if (!key) throw new Error('Falta la API Key de Gemini. Configúrala en ⚙️ Ajustes.');
 
@@ -630,6 +638,15 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
     }
   }
 
+  // ── Proactive throttle ──────────────────────────────────────
+  // Only on the first attempt; retries have their own wait above.
+  if (attempt === 1) {
+    const gap = Date.now() - lastGeminiCallAt;
+    if (gap < GEMINI_MIN_GAP_MS) await sleep(GEMINI_MIN_GAP_MS - gap);
+  }
+  lastGeminiCallAt = Date.now();
+  // ─────────────────────────────────────────────────────────────
+
   try {
     const res = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
@@ -637,7 +654,7 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
         contents: [{ role: 'user', parts }],
         generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
       },
-      { timeout: 55000 }
+      { timeout: 90000 }
     );
     const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('Respuesta vacía de Gemini');
@@ -651,16 +668,20 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
     const status = err.response?.status;
     if (status === 429 && attempt <= MAX_ATTEMPTS) {
       const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0');
-      if (retryAfter > 120) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter/60)} min.`);
-      // La ventana de rate-limit de Gemini es de 60s — esperar siempre al menos eso
-      const waitSec = Math.max(retryAfter > 0 ? retryAfter : 0, 60);
+      // Log full error body to Render logs for diagnosis
+      console.warn('Gemini 429 body:', JSON.stringify(err.response?.data || {}));
+      if (retryAfter > 300) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter/60)} min.`);
+      // Wait at least 90s: Gemini sliding window can span longer than 60s
+      const waitSec = Math.max(retryAfter > 0 ? retryAfter : 0, 90);
       if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
       await sleep(waitSec * 1000);
+      lastGeminiCallAt = Date.now(); // reset throttle after the long wait
       return callGemini(prompt, files, attempt + 1, onRetry);
     }
     if (status === 401) throw new Error('API Key de Gemini inválida. Revisa la configuración.');
-    const msg = err.response?.data?.error?.message || err.message;
-    throw new Error(`Error de Gemini: ${msg}`);
+    const geminiMsg = err.response?.data?.error?.message || err.message;
+    console.error('Gemini error:', status, geminiMsg);
+    throw new Error(`Error de Gemini: ${geminiMsg}`);
   }
 }
 
@@ -1028,9 +1049,6 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
           summary: (correction.evaluacion_general || '').substring(0, 160),
         });
 
-        // Pausa entre alumnos: Gemini 15 RPM → 5s seguros; Groq es más permisivo
-        if (i < toCorrect.length - 1) await sleep(getProvider() === 'gemini' ? 5000 : 2000);
-
       } catch (err) {
         console.error(`Error con ${sub.studentName}:`, err.message);
         send('student_error', { student: sub.studentName, error: err.message });
@@ -1046,6 +1064,11 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
           Feedforward: '',
           'Archivo HTML': '',
         });
+      }
+
+      // Pausa entre alumnos — siempre, incluso tras error, para no agotar la cuota
+      if (i < toCorrect.length - 1) {
+        await sleep(getProvider() === 'gemini' ? 5000 : 2000);
       }
     }
 
