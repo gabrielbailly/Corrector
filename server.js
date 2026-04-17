@@ -41,8 +41,8 @@ function getGeminiKey() {
   return process.env.GEMINI_API_KEY || appConfig.geminiApiKey || '';
 }
 function getProvider() {
-  if (process.env.AI_PROVIDER) return process.env.AI_PROVIDER;
   if (appConfig.aiProvider) return appConfig.aiProvider;
+  if (process.env.AI_PROVIDER) return process.env.AI_PROVIDER;
   if (getGroqKey() && !getGeminiKey()) return 'groq';
   return 'gemini';
 }
