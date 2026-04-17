@@ -235,6 +235,13 @@ function sanitizeFilename(name) {
   );
 }
 
+function anonymizeStudentFilename(name, index) {
+  const safe = String(name || 'archivo');
+  const dot = safe.lastIndexOf('.');
+  const ext = dot > 0 ? safe.slice(dot).replace(/[^.a-zA-Z0-9]/g, '') : '';
+  return `entrega_${index + 1}${ext}`;
+}
+
 // ============================================================
 //  CONFIGURACIÓN (API Keys)
 // ============================================================
@@ -1222,7 +1229,11 @@ app.post('/api/student-files', express.json({ limit: '2mb' }), async (req, res) 
         mime = c.mimeType;
       }
 
-      const entry = { name: file.name, mimeType: mime, dataBase64: buf.toString('base64') };
+      const entry = {
+        name: anonymizeStudentFilename(file.name, files.length),
+        mimeType: mime,
+        dataBase64: buf.toString('base64'),
+      };
 
       // For PDFs: also extract text (Groq doesn't support PDFs natively)
       if (mime === 'application/pdf') {
