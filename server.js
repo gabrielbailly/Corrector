@@ -295,6 +295,19 @@ app.post('/api/instruction-templates', express.json({ limit: '256kb' }), (req, r
   res.json({ success: true, templates: [...appConfig.instructionTemplates].sort((a, b) => a.name.localeCompare(b.name, 'es')) });
 });
 
+app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Falta el nombre de la plantilla.' });
+  const templates = getInstructionTemplates();
+  const next = templates.filter((t) => t.name !== name);
+  if (next.length === templates.length) {
+    return res.status(404).json({ error: 'No se encontró la plantilla.' });
+  }
+  appConfig.instructionTemplates = next;
+  saveConfig();
+  res.json({ success: true, templates: [...next].sort((a, b) => a.name.localeCompare(b.name, 'es')) });
+});
+
 app.get('/api/ai-config', (req, res) => {
   const provider = getProvider();
   const key = provider === 'groq' ? getGroqKey() : getGeminiKey();
@@ -890,7 +903,20 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
   .print-btn:hover{background:#1d4ed8}
   @media print{
     body{background:#fff}
-    .card{box-shadow:none;border:1px solid #e2e8f0;page-break-inside:avoid}
+    @page{margin:10mm}
+    .header{padding:1rem 1.1rem!important}
+    .header h1{font-size:1.2rem!important}
+    .header .alumno{margin-bottom:.45rem!important}
+    .grade-box{padding:.4rem .75rem!important}
+    .grade-num{font-size:1.85rem!important;min-width:64px!important}
+    .container{margin:.55rem auto!important;padding:0 .2rem!important}
+    .card{box-shadow:none;border:1px solid #e2e8f0;page-break-inside:avoid;padding:.7rem .8rem!important;margin-bottom:.45rem!important}
+    .card-title{margin-bottom:.45rem!important}
+    .meta-grid{gap:.35rem!important}
+    .meta-item{padding:.35rem .45rem!important}
+    ul.feedback-list li{margin-bottom:.18rem!important;padding:.38rem .55rem .38rem 1.35rem!important}
+    .bg-gray,.bg-blue{padding:.55rem .65rem!important}
+    .justif{margin-top:.4rem!important;padding:.4rem .5rem!important}
     .no-print{display:none}
     .header{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   }

@@ -78,6 +78,15 @@ textarea{resize:vertical;min-height:90px}
 .btn-full{width:100%}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn-icon{padding:.5rem;min-width:36px}
+.tab-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+.tab-btn{background:#fff;border:1.5px solid var(--border);color:var(--text-muted);padding:.65rem 1rem;border-radius:999px;font-size:.85rem;font-weight:700;cursor:pointer;transition:all .2s}
+.tab-btn.active{background:var(--blue-light);border-color:#93c5fd;color:var(--blue)}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+.section-box{background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem}
+.template-editor{display:flex;flex-direction:column;gap:.75rem}
+.template-actions{display:flex;gap:.75rem;flex-wrap:wrap}
+.template-actions .btn{flex:1;min-width:160px}
 
 /* ========== AUTH CARD ========== */
 .auth-connect{display:flex;flex-direction:column;align-items:center;padding:1.5rem;text-align:center;gap:1rem}
@@ -370,48 +379,55 @@ textarea{resize:vertical;min-height:90px}
     </div>
 
     <div id="step2-content">
-      <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;margin-bottom:1rem">
-        <label>Seleccionar curso y tarea</label>
-        <div class="input-row">
-          <select id="course-select" class="task-select" onchange="handleCourseChange()">
-            <option value="">Selecciona un curso…</option>
-          </select>
-          <select id="coursework-select" class="task-select" disabled>
-            <option value="">Selecciona una tarea…</option>
-          </select>
-          <button class="btn btn-primary" id="btn-load-selected-task" onclick="loadSelectedTask()">Cargar</button>
-        </div>
-        <p class="text-muted mt-1">Elige primero el curso y después la tarea. Es la opción más cómoda para no copiar la URL.</p>
+      <div class="tab-row">
+        <button class="tab-btn active" id="step2-tab-classroom" onclick="switchTab('step2', 'classroom')">Google Classroom</button>
+        <button class="tab-btn" id="step2-tab-local" onclick="switchTab('step2', 'local')">Subir desde ordenador</button>
       </div>
 
-      <div class="divider"></div>
+      <div class="tab-panel active" id="step2-panel-classroom">
+        <div class="section-box" style="margin-bottom:1rem">
+          <label>Seleccionar curso y tarea</label>
+          <div class="input-row">
+            <select id="course-select" class="task-select" onchange="handleCourseChange()">
+              <option value="">Selecciona un curso…</option>
+            </select>
+            <select id="coursework-select" class="task-select" disabled>
+              <option value="">Selecciona una tarea…</option>
+            </select>
+            <button class="btn btn-primary" id="btn-load-selected-task" onclick="loadSelectedTask()">Cargar</button>
+          </div>
+          <p class="text-muted mt-1">Elige primero el curso y después la tarea. Es la opción más cómoda para no copiar la URL.</p>
+        </div>
 
-      <label>URL de la tarea en Google Classroom</label>
-      <div class="input-row">
-        <input type="url" id="task-url" placeholder="https://classroom.google.com/c/XXXXX/a/YYYYY/details" />
-        <button class="btn btn-primary" id="btn-load-task" onclick="loadTask()">
-          Cargar
-        </button>
-      </div>
-      <p class="text-muted mt-1">La URL la encuentras en la barra del navegador al abrir la tarea en Classroom</p>
+        <div class="divider"></div>
 
-      <div class="divider"></div>
-
-      <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem">
-        <label>Subir entregas desde tu ordenador</label>
+        <label>URL de la tarea en Google Classroom</label>
         <div class="input-row">
-          <input type="text" id="local-course-name" placeholder="Nombre del curso" />
-          <input type="text" id="local-task-name" placeholder="Nombre de la tarea o examen" />
+          <input type="url" id="task-url" placeholder="https://classroom.google.com/c/XXXXX/a/YYYYY/details" />
+          <button class="btn btn-primary" id="btn-load-task" onclick="loadTask()">
+            Cargar
+          </button>
         </div>
-        <div class="dropzone mt-1" onclick="document.getElementById('local-submissions-input').click()">
-          <input type="file" id="local-submissions-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleLocalSubmissions(event)">
-          <div class="dropzone-icon">🗂️</div>
-          <p><strong>Haz clic para subir las entregas</strong></p>
-          <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">Cada archivo se tratará como la entrega de un alumno. El nombre del archivo se usará como nombre del alumno.</p>
-        </div>
-        <div class="file-list" id="local-submissions-list"></div>
-        <div class="mt-2">
-          <button class="btn btn-primary" onclick="loadLocalTask()">Cargar entregas locales</button>
+        <p class="text-muted mt-1">La URL la encuentras en la barra del navegador al abrir la tarea en Classroom</p>
+      </div>
+
+      <div class="tab-panel" id="step2-panel-local">
+        <div class="section-box">
+          <label>Subir entregas desde tu ordenador</label>
+          <div class="input-row">
+            <input type="text" id="local-course-name" placeholder="Nombre del curso" />
+            <input type="text" id="local-task-name" placeholder="Nombre de la tarea o examen" />
+          </div>
+          <div class="dropzone mt-1" onclick="document.getElementById('local-submissions-input').click()">
+            <input type="file" id="local-submissions-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleLocalSubmissions(event)">
+            <div class="dropzone-icon">🗂️</div>
+            <p><strong>Haz clic para subir las entregas</strong></p>
+            <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">Cada archivo se tratará como la entrega de un alumno. El nombre del archivo se usará como nombre del alumno.</p>
+          </div>
+          <div class="file-list" id="local-submissions-list"></div>
+          <div class="mt-2">
+            <button class="btn btn-primary" onclick="loadLocalTask()">Cargar entregas locales</button>
+          </div>
         </div>
       </div>
 
@@ -454,36 +470,59 @@ textarea{resize:vertical;min-height:90px}
     </div>
 
     <div id="step3-content">
-      <!-- Dropzone -->
-      <label>
-        Material de referencia
-        <span class="text-muted" style="font-weight:400"> — Rúbrica, solución, pauta (opcional pero recomendado)</span>
-      </label>
-      <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()"
-           ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
-        <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleFileSelect(event)">
-        <div class="dropzone-icon">📎</div>
-        <p><strong>Haz clic para subir</strong> o arrastra los archivos aquí</p>
-        <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">PDF, imágenes, Word, TXT — hasta 20 MB cada archivo</p>
+      <div class="tab-row">
+        <button class="tab-btn active" id="step3-tab-custom" onclick="switchTab('step3', 'custom')">Referencia e instrucciones</button>
+        <button class="tab-btn" id="step3-tab-templates" onclick="switchTab('step3', 'templates')">Plantillas guardadas</button>
       </div>
-      <div class="file-list" id="file-list"></div>
 
-      <div class="divider"></div>
+      <div class="tab-panel active" id="step3-panel-custom">
+        <label>
+          Material de referencia
+          <span class="text-muted" style="font-weight:400"> — Rúbrica, solución, pauta (opcional pero recomendado)</span>
+        </label>
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()"
+             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+          <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleFileSelect(event)">
+          <div class="dropzone-icon">📎</div>
+          <p><strong>Haz clic para subir</strong> o arrastra los archivos aquí</p>
+          <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">PDF, imágenes, Word, TXT — hasta 20 MB cada archivo</p>
+        </div>
+        <div class="file-list" id="file-list"></div>
 
-      <label>Plantilla de instrucciones guardada <span class="text-muted" style="font-weight:400">(opcional)</span></label>
-      <div class="input-row">
-        <select id="instruction-template-select" class="task-select" onchange="applyInstructionTemplate()">
-          <option value="">Selecciona una plantilla…</option>
-        </select>
-        <input type="text" id="instruction-template-name" placeholder="Nombre para guardar la plantilla" />
-        <button class="btn btn-secondary" onclick="saveInstructionTemplate()">Guardar plantilla</button>
+        <div class="divider"></div>
+
+        <label>Instrucciones adicionales para la corrección <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+        <textarea id="instructions" rows="4" oninput="updateStep3Summary()" placeholder="Ej: Corrige con criterio de selectividad. La pregunta 3 vale el doble. Descuenta 0.1 por cada falta de ortografía…"></textarea>
       </div>
-      <p class="text-muted mt-1">Ejemplos: rúbrica para redacción, plantilla de examen, rúbrica para trabajo de ciencias.</p>
 
-      <div class="mt-2"></div>
+      <div class="tab-panel" id="step3-panel-templates">
+        <div class="section-box template-editor">
+          <div>
+            <label>Plantillas guardadas</label>
+            <select id="instruction-template-select" class="task-select" onchange="selectInstructionTemplate()">
+              <option value="">Selecciona una plantilla…</option>
+            </select>
+            <p class="text-muted mt-1">Elige una plantilla para usarla, editarla o eliminarla.</p>
+          </div>
 
-      <label>Instrucciones adicionales para la corrección <span class="text-muted" style="font-weight:400">(opcional)</span></label>
-      <textarea id="instructions" rows="4" oninput="updateStep3Summary()" placeholder="Ej: Corrige con criterio de selectividad. La pregunta 3 vale el doble. Descuenta 0.1 por cada falta de ortografía…"></textarea>
+          <div>
+            <label>Nombre de la plantilla</label>
+            <input type="text" id="instruction-template-name" placeholder="Ej: Rúbrica para redacción" />
+          </div>
+
+          <div>
+            <label>Contenido de la plantilla</label>
+            <textarea id="instruction-template-text" rows="7" placeholder="Escribe aquí las instrucciones reutilizables para futuras correcciones..."></textarea>
+          </div>
+
+          <div class="template-actions">
+            <button class="btn btn-primary" onclick="useInstructionTemplate()">Usar en esta corrección</button>
+            <button class="btn btn-secondary" onclick="saveInstructionTemplate()">Guardar o actualizar</button>
+            <button class="btn btn-red" onclick="deleteInstructionTemplate()">Eliminar plantilla</button>
+            <button class="btn btn-secondary" onclick="resetInstructionTemplateEditor()">Nueva plantilla</button>
+          </div>
+        </div>
+      </div>
 
       <div class="mt-2" id="step3-summary" style="background:var(--blue-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:1rem;font-size:.875rem;color:#1e40af"></div>
 
@@ -641,7 +680,7 @@ async function saveSettings() {
 async function loadInstructionTemplates() {
   try {
     const r = await fetch('/api/instruction-templates');
-    const data = await r.json();
+    const data = await r.json().catch(() => ({ templates: [] }));
     state.instructionTemplates = data.templates || [];
     renderInstructionTemplates();
   } catch (e) {}
@@ -657,20 +696,39 @@ function renderInstructionTemplates() {
   if (current) select.value = current;
 }
 
-function applyInstructionTemplate() {
+function selectInstructionTemplate() {
   const select = document.getElementById('instruction-template-select');
   const nameInput = document.getElementById('instruction-template-name');
-  const instructionsEl = document.getElementById('instructions');
+  const textEl = document.getElementById('instruction-template-text');
   const tpl = state.instructionTemplates[Number(select.value)];
-  if (!tpl || !instructionsEl) return;
-  instructionsEl.value = tpl.text;
+  if (!tpl || !textEl) return;
   if (nameInput) nameInput.value = tpl.name;
+  textEl.value = tpl.text;
+}
+
+function useInstructionTemplate() {
+  const textEl = document.getElementById('instruction-template-text');
+  const instructionsEl = document.getElementById('instructions');
+  if (!textEl || !instructionsEl || !textEl.value.trim()) {
+    return alert('Selecciona o escribe una plantilla antes de usarla.');
+  }
+  instructionsEl.value = textEl.value.trim();
   updateStep3Summary();
+  switchTab('step3', 'custom');
+}
+
+function resetInstructionTemplateEditor() {
+  const select = document.getElementById('instruction-template-select');
+  const nameInput = document.getElementById('instruction-template-name');
+  const textEl = document.getElementById('instruction-template-text');
+  if (select) select.value = '';
+  if (nameInput) nameInput.value = '';
+  if (textEl) textEl.value = '';
 }
 
 async function saveInstructionTemplate() {
   const name = document.getElementById('instruction-template-name').value.trim();
-  const text = document.getElementById('instructions').value.trim();
+  const text = document.getElementById('instruction-template-text').value.trim();
   if (!name || !text) return alert('Escribe un nombre y unas instrucciones para guardar la plantilla.');
 
   try {
@@ -679,7 +737,7 @@ async function saveInstructionTemplate() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, text }),
     });
-    const data = await r.json();
+    const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || 'No se pudo guardar la plantilla');
     state.instructionTemplates = data.templates || [];
     renderInstructionTemplates();
@@ -689,6 +747,35 @@ async function saveInstructionTemplate() {
   } catch (e) {
     alert(`Error guardando plantilla: ${e.message}`);
   }
+}
+
+async function deleteInstructionTemplate() {
+  const select = document.getElementById('instruction-template-select');
+  const tpl = state.instructionTemplates[Number(select.value)];
+  if (!tpl) return alert('Selecciona una plantilla para eliminarla.');
+  if (!confirm(`¿Eliminar la plantilla "${tpl.name}"?`)) return;
+
+  try {
+    const r = await fetch('/api/instruction-templates/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: tpl.name }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'No se pudo eliminar la plantilla');
+    state.instructionTemplates = data.templates || [];
+    renderInstructionTemplates();
+    resetInstructionTemplateEditor();
+  } catch (e) {
+    alert(`Error eliminando plantilla: ${e.message}`);
+  }
+}
+
+function switchTab(group, name) {
+  document.querySelectorAll(`[id^="${group}-tab-"]`).forEach((el) => el.classList.remove('active'));
+  document.querySelectorAll(`[id^="${group}-panel-"]`).forEach((el) => el.classList.remove('active'));
+  document.getElementById(`${group}-tab-${name}`)?.classList.add('active');
+  document.getElementById(`${group}-panel-${name}`)?.classList.add('active');
 }
 
 function handleUrlParams() {
@@ -922,6 +1009,7 @@ async function loadTaskRequest(payload, buttonId) {
 
     state.task = data;
     state.submissions = data.submissions;
+    switchTab('step2', 'classroom');
     renderTaskInfo(data);
   } catch (e) {
     showAlertEl('task-alert', `Error de red: ${e.message}`, 'error');
@@ -1001,6 +1089,7 @@ function loadLocalTask() {
     submissions,
   };
   state.submissions = submissions;
+  switchTab('step2', 'local');
   renderTaskInfo(state.task);
 }
 
