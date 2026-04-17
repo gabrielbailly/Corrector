@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Corrector IA — Google Classroom</title>
+<title>Corrector IA</title>
 <style>
 /* ========== RESET & BASE ========== */
 *{margin:0;padding:0;box-sizing:border-box}
@@ -210,11 +210,11 @@ textarea{resize:vertical;min-height:90px}
     <div class="logo-icon">🎓</div>
     <div>
       <div>Corrector IA</div>
-      <div style="font-size:.7rem;opacity:.7;font-weight:400">Google Classroom + Groq IA</div>
+      <div style="font-size:.7rem;opacity:.7;font-weight:400">Asistente para la corrección de tareas y exámenes</div>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:.6rem">
-    <button class="user-pill" onclick="toggleSettings()" title="Configurar API Key de Groq">
+    <button class="user-pill" onclick="toggleSettings()" title="Configurar proveedor de IA">
       ⚙️ <span id="groq-status-pill">Ajustes</span>
     </button>
     <div id="header-user" class="hidden">
@@ -282,7 +282,7 @@ textarea{resize:vertical;min-height:90px}
 
   <div class="hero">
     <h2>Corrige tareas en minutos con IA</h2>
-    <p>Conecta Google Classroom, carga la tarea y deja que Gemini corrija a tus alumnos.</p>
+    <p>Conecta Google Classroom o sube entregas desde tu ordenador y deja que la IA te ayude con la corrección.</p>
   </div>
 
   <!-- STEPPER -->
@@ -311,7 +311,7 @@ textarea{resize:vertical;min-height:90px}
       <div class="card-step-num">1</div>
       <div>
         <h3>Conectar con Google</h3>
-        <p>Necesitas autorizar el acceso a Google Classroom para cargar las entregas</p>
+        <p>Conecta Classroom o continúa sin Google para subir entregas desde tu ordenador</p>
       </div>
     </div>
 
@@ -337,6 +337,9 @@ textarea{resize:vertical;min-height:90px}
       <p class="text-muted" style="font-size:.78rem">
         Se abrirá la ventana de autorización de Google en tu navegador
       </p>
+      <button class="btn btn-secondary" onclick="continueWithoutGoogle()">
+        Continuar sin Google
+      </button>
     </div>
 
     <div id="auth-connected" class="hidden">
@@ -361,8 +364,8 @@ textarea{resize:vertical;min-height:90px}
     <div class="card-header">
       <div class="card-step-num">2</div>
       <div>
-        <h3>Cargar tarea de Classroom</h3>
-        <p>Pega la URL de la tarea que quieres corregir</p>
+        <h3>Cargar tarea o entregas</h3>
+        <p>Elige Classroom o sube entregas desde tu ordenador</p>
       </div>
     </div>
 
@@ -391,13 +394,28 @@ textarea{resize:vertical;min-height:90px}
         </button>
       </div>
       <p class="text-muted mt-1">La URL la encuentras en la barra del navegador al abrir la tarea en Classroom</p>
-      <button class="btn btn-secondary mt-1" style="font-size:.8rem;padding:.4rem .9rem" onclick="showMyCourses()">🔍 Ver mis cursos disponibles</button>
+
+      <div class="divider"></div>
+
+      <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem">
+        <label>Subir entregas desde tu ordenador</label>
+        <div class="input-row">
+          <input type="text" id="local-course-name" placeholder="Nombre del curso" />
+          <input type="text" id="local-task-name" placeholder="Nombre de la tarea o examen" />
+        </div>
+        <div class="dropzone mt-1" onclick="document.getElementById('local-submissions-input').click()">
+          <input type="file" id="local-submissions-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleLocalSubmissions(event)">
+          <div class="dropzone-icon">🗂️</div>
+          <p><strong>Haz clic para subir las entregas</strong></p>
+          <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">Cada archivo se tratará como la entrega de un alumno. El nombre del archivo se usará como nombre del alumno.</p>
+        </div>
+        <div class="file-list" id="local-submissions-list"></div>
+        <div class="mt-2">
+          <button class="btn btn-primary" onclick="loadLocalTask()">Cargar entregas locales</button>
+        </div>
+      </div>
 
       <div id="task-alert" class="hidden mt-2"></div>
-      <div id="my-courses-panel" class="hidden mt-2" style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem">
-        <strong style="font-size:.85rem">Cursos en tu cuenta:</strong>
-        <div id="my-courses-list" style="margin-top:.5rem;font-size:.85rem"></div>
-      </div>
 
       <!-- Resultado cargado -->
       <div id="task-loaded" class="hidden mt-2">
@@ -516,6 +534,7 @@ let state = {
   submissions: [],   // all submissions
   selected: new Set(), // selected student IDs
   refFiles: [],      // reference file objects
+  localSubmissionFiles: [],
   correctionOutput: null,
   correctionStartedAt: null,
 };
@@ -669,6 +688,12 @@ function copyToken() {
   });
 }
 
+function continueWithoutGoogle() {
+  state.user = { authenticated: false, localMode: true };
+  markStepDone(1);
+  goToStep2();
+}
+
 async function checkAuth() {
   try {
     const r = await fetch('/auth/status');
@@ -734,7 +759,7 @@ function activateStep(n) {
 
 function goToStep2() {
   activateStep(2);
-  loadCourseOptions();
+  if (state.user?.authenticated) loadCourseOptions();
   document.getElementById('card-task').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -756,6 +781,7 @@ function goToStep3() {
 async function loadCourseOptions() {
   const select = document.getElementById('course-select');
   if (!select || select.dataset.loaded === '1') return;
+  if (!state.user?.authenticated) return;
 
   try {
     select.disabled = true;
@@ -844,6 +870,73 @@ async function loadTask() {
   return loadTaskRequest({ url }, 'btn-load-task');
 }
 
+function handleLocalSubmissions(e) {
+  state.localSubmissionFiles = Array.from(e.target.files || []);
+  renderLocalSubmissionsList();
+}
+
+function renderLocalSubmissionsList() {
+  const list = document.getElementById('local-submissions-list');
+  if (!list) return;
+  list.innerHTML = '';
+  state.localSubmissionFiles.forEach((file, i) => {
+    const item = document.createElement('div');
+    const studentName = inferStudentNameFromFilename(file.name);
+    const size = file.size > 1e6 ? (file.size / 1e6).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB';
+    item.className = 'file-item';
+    item.innerHTML = `
+      <span class="file-icon">🧑‍🎓</span>
+      <span class="file-name">${esc(studentName)}</span>
+      <span class="file-size">${esc(file.name)} · ${size}</span>
+      <span class="file-remove" onclick="removeLocalSubmission(${i})" title="Quitar">✕</span>
+    `;
+    list.appendChild(item);
+  });
+}
+
+function removeLocalSubmission(idx) {
+  state.localSubmissionFiles.splice(idx, 1);
+  renderLocalSubmissionsList();
+}
+
+function inferStudentNameFromFilename(filename) {
+  return filename.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Alumno';
+}
+
+function anonymizeLocalFilename(filename, index) {
+  const dot = filename.lastIndexOf('.');
+  const ext = dot > 0 ? filename.slice(dot).replace(/[^.a-zA-Z0-9]/g, '') : '';
+  return `entrega_${index + 1}${ext}`;
+}
+
+function loadLocalTask() {
+  const courseName = document.getElementById('local-course-name').value.trim();
+  const taskName = document.getElementById('local-task-name').value.trim();
+  if (!courseName || !taskName) return alert('Indica el curso y el nombre de la tarea o examen.');
+  if (!state.localSubmissionFiles.length) return alert('Sube al menos una entrega.');
+
+  const submissions = state.localSubmissionFiles.map((file, index) => ({
+    id: `local-${index}`,
+    studentId: `local-${index}`,
+    studentName: inferStudentNameFromFilename(file.name),
+    studentEmail: '',
+    state: 'LOCAL',
+    late: false,
+    hasSubmission: true,
+    source: 'local',
+    localFiles: [file],
+  }));
+
+  state.task = {
+    source: 'local',
+    task: taskName,
+    course: courseName,
+    submissions,
+  };
+  state.submissions = submissions;
+  renderTaskInfo(state.task);
+}
+
 async function loadSelectedTask() {
   const courseId = document.getElementById('course-select').value;
   const courseWorkId = document.getElementById('coursework-select').value;
@@ -856,11 +949,11 @@ async function loadSelectedTask() {
 function renderTaskInfo(data) {
   const courseSelect = document.getElementById('course-select');
   const taskSelect = document.getElementById('coursework-select');
-  if (courseSelect) courseSelect.value = data.courseId;
-  if (taskSelect && !Array.from(taskSelect.options).some(o => o.value === data.courseWorkId)) {
+  if (courseSelect && data.courseId) courseSelect.value = data.courseId;
+  if (taskSelect && data.courseWorkId && !Array.from(taskSelect.options).some(o => o.value === data.courseWorkId)) {
     taskSelect.innerHTML += `<option value="${esc(data.courseWorkId)}">${esc(data.task)}</option>`;
   }
-  if (taskSelect) {
+  if (taskSelect && data.courseWorkId) {
     taskSelect.value = data.courseWorkId;
     taskSelect.disabled = false;
   }
@@ -1268,17 +1361,33 @@ async function startCorrection() {
     updateStudentPhase(i, selected.length, `Descargando archivos de ${sub.studentName}…`, sub.studentName, 0.1);
 
     try {
-      // 1. Download student files from server (Drive → base64)
-      const filesRes = await fetch('/api/student-files', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ submission: sub }),
-      });
-      if (!filesRes.ok) {
-        const err = await filesRes.json().catch(() => ({}));
-        throw new Error(err.error || `Error del servidor: ${filesRes.status}`);
+      let studentName = sub.studentName;
+      let studentEmail = sub.studentEmail || '';
+      let studentFiles = [];
+
+      if (sub.source === 'local') {
+        updateStudentPhase(i, selected.length, `Preparando archivos locales de ${studentName}…`, studentName, 0.2);
+        studentFiles = await Promise.all((sub.localFiles || []).map(async (f, fileIndex) => ({
+          name: anonymizeLocalFilename(f.name, fileIndex),
+          mimeType: f.type || 'application/octet-stream',
+          dataBase64: await fileToBase64Data(f),
+        })));
+      } else {
+        // 1. Download student files from server (Drive → base64)
+        const filesRes = await fetch('/api/student-files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ submission: sub }),
+        });
+        if (!filesRes.ok) {
+          const err = await filesRes.json().catch(() => ({}));
+          throw new Error(err.error || `Error del servidor: ${filesRes.status}`);
+        }
+        const loaded = await filesRes.json();
+        studentName = loaded.studentName;
+        studentEmail = loaded.studentEmail || '';
+        studentFiles = loaded.files || [];
       }
-      const { studentName, studentEmail, files: studentFiles } = await filesRes.json();
 
       if (!studentFiles.length) throw new Error('No se pudieron descargar los archivos de la entrega');
 
@@ -1542,32 +1651,12 @@ function startRetryCountdown(totalSec, attempt, max) {
   _countdownTimer = setInterval(tick, 1000);
 }
 
-async function showMyCourses() {
-  const panel = document.getElementById('my-courses-panel');
-  const list = document.getElementById('my-courses-list');
-  panel.classList.remove('hidden');
-  list.innerHTML = '<span style="color:var(--text-muted)">Cargando…</span>';
-  try {
-    const r = await fetch('/api/my-courses');
-    const data = await r.json();
-    if (data.error) { list.innerHTML = `<span style="color:var(--red)">${esc(data.error)}</span>`; return; }
-    if (!data.courses.length) { list.innerHTML = '<span style="color:var(--text-muted)">No se encontraron cursos en esta cuenta.</span>'; return; }
-    list.innerHTML = data.courses.map(c =>
-      `<div style="padding:.3rem 0;border-bottom:1px solid var(--border)">
-        <strong>${esc(c.name)}</strong>${c.section ? ` · ${esc(c.section)}` : ''}
-        <span style="font-size:.75rem;color:var(--text-muted);margin-left:.5rem">ID: ${c.id}</span>
-      </div>`
-    ).join('');
-  } catch(e) {
-    list.innerHTML = `<span style="color:var(--red)">Error: ${esc(e.message)}</span>`;
-  }
-}
-
 function newCorrection() {
   state.task = null;
   state.submissions = [];
   state.selected.clear();
   state.refFiles = [];
+  state.localSubmissionFiles = [];
   state.correctionOutput = null;
   location.reload();
 }
