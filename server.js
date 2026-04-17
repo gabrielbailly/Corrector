@@ -632,7 +632,7 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
 
   try {
     const res = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
       {
         contents: [{ role: 'user', parts }],
         generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
@@ -651,8 +651,9 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
     const status = err.response?.status;
     if (status === 429 && attempt <= MAX_ATTEMPTS) {
       const retryAfter = parseInt(err.response?.headers?.['retry-after'] || '0');
-      if (retryAfter > 90) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter/60)} min.`);
-      const waitSec = retryAfter > 0 ? retryAfter : 15 * attempt;
+      if (retryAfter > 120) throw new Error(`Cuota diaria de Gemini agotada. Reinicia en ~${Math.ceil(retryAfter/60)} min.`);
+      // La ventana de rate-limit de Gemini es de 60s — esperar siempre al menos eso
+      const waitSec = Math.max(retryAfter > 0 ? retryAfter : 0, 60);
       if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
       await sleep(waitSec * 1000);
       return callGemini(prompt, files, attempt + 1, onRetry);

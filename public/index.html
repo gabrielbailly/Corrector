@@ -1009,13 +1009,13 @@ function handleSSEEvent(event, data) {
       break;
 
     case 'retry':
-      document.getElementById('current-student').textContent =
-        `⏳ Límite de API — esperando ${data.wait}s antes de reintentar (intento ${data.attempt}/${data.max})…`;
+      startRetryCountdown(data.wait, data.attempt, data.max);
       break;
 
     case 'waiting':
       document.getElementById('current-student').textContent = `⏱ ${data.message}`;
       break;
+
 
     case 'done':
       updateProgress(100, 1, '¡Corrección completada!');
@@ -1104,6 +1104,31 @@ function showResults(data) {
       Desde ahí puedes imprimirlo o guardarlo como PDF.<br>
       Usa <strong>"Descargar TODO como ZIP"</strong> para obtener todos los archivos a la vez.
     </p>`;
+}
+
+// Countdown visible cuando la API pide esperar
+let _countdownTimer = null;
+function startRetryCountdown(totalSec, attempt, max) {
+  if (_countdownTimer) clearInterval(_countdownTimer);
+  let remaining = totalSec;
+  const el = document.getElementById('current-student');
+  const bar = document.getElementById('progress-fill');
+  const savedWidth = bar ? bar.style.width : '0%';
+
+  const tick = () => {
+    if (!el) return;
+    const mins = Math.floor(remaining / 60);
+    const secs = remaining % 60;
+    const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    el.innerHTML = `⏳ Límite de API — reintentar en <strong>${timeStr}</strong> (intento ${attempt}/${max})`;
+    if (remaining <= 0) {
+      clearInterval(_countdownTimer);
+      el.textContent = '🔄 Reintentando…';
+    }
+    remaining--;
+  };
+  tick();
+  _countdownTimer = setInterval(tick, 1000);
 }
 
 async function showMyCourses() {
