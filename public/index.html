@@ -470,8 +470,20 @@ textarea{resize:vertical;min-height:90px}
 
       <div class="divider"></div>
 
+      <label>Plantilla de instrucciones guardada <span class="text-muted" style="font-weight:400">(opcional)</span></label>
+      <div class="input-row">
+        <select id="instruction-template-select" class="task-select" onchange="applyInstructionTemplate()">
+          <option value="">Selecciona una plantilla…</option>
+        </select>
+        <input type="text" id="instruction-template-name" placeholder="Nombre para guardar la plantilla" />
+        <button class="btn btn-secondary" onclick="saveInstructionTemplate()">Guardar plantilla</button>
+      </div>
+      <p class="text-muted mt-1">Ejemplos: rúbrica para redacción, plantilla de examen, rúbrica para trabajo de ciencias.</p>
+
+      <div class="mt-2"></div>
+
       <label>Instrucciones adicionales para la corrección <span class="text-muted" style="font-weight:400">(opcional)</span></label>
-      <textarea id="instructions" rows="4" placeholder="Ej: Corrige con criterio de selectividad. La pregunta 3 vale el doble. Descuenta 0.1 por cada falta de ortografía…"></textarea>
+      <textarea id="instructions" rows="4" oninput="updateStep3Summary()" placeholder="Ej: Corrige con criterio de selectividad. La pregunta 3 vale el doble. Descuenta 0.1 por cada falta de ortografía…"></textarea>
 
       <div class="mt-2" id="step3-summary" style="background:var(--blue-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:1rem;font-size:.875rem;color:#1e40af"></div>
 
@@ -535,6 +547,7 @@ let state = {
   selected: new Set(), // selected student IDs
   refFiles: [],      // reference file objects
   localSubmissionFiles: [],
+  instructionTemplates: [],
   correctionOutput: null,
   correctionStartedAt: null,
 };
@@ -545,6 +558,7 @@ let state = {
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   checkConfig();
+  loadInstructionTemplates();
   handleUrlParams();
 });
 
@@ -621,6 +635,59 @@ async function saveSettings() {
   } catch (e) {
     msg.style.color = '#fca5a5';
     msg.textContent = `Error: ${e.message}`;
+  }
+}
+
+async function loadInstructionTemplates() {
+  try {
+    const r = await fetch('/api/instruction-templates');
+    const data = await r.json();
+    state.instructionTemplates = data.templates || [];
+    renderInstructionTemplates();
+  } catch (e) {}
+}
+
+function renderInstructionTemplates() {
+  const select = document.getElementById('instruction-template-select');
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = '<option value="">Selecciona una plantilla…</option>' + state.instructionTemplates
+    .map((tpl, index) => `<option value="${index}">${esc(tpl.name)}</option>`)
+    .join('');
+  if (current) select.value = current;
+}
+
+function applyInstructionTemplate() {
+  const select = document.getElementById('instruction-template-select');
+  const nameInput = document.getElementById('instruction-template-name');
+  const instructionsEl = document.getElementById('instructions');
+  const tpl = state.instructionTemplates[Number(select.value)];
+  if (!tpl || !instructionsEl) return;
+  instructionsEl.value = tpl.text;
+  if (nameInput) nameInput.value = tpl.name;
+  updateStep3Summary();
+}
+
+async function saveInstructionTemplate() {
+  const name = document.getElementById('instruction-template-name').value.trim();
+  const text = document.getElementById('instructions').value.trim();
+  if (!name || !text) return alert('Escribe un nombre y unas instrucciones para guardar la plantilla.');
+
+  try {
+    const r = await fetch('/api/instruction-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, text }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudo guardar la plantilla');
+    state.instructionTemplates = data.templates || [];
+    renderInstructionTemplates();
+    const idx = state.instructionTemplates.findIndex((tpl) => tpl.name === name);
+    if (idx >= 0) document.getElementById('instruction-template-select').value = String(idx);
+    alert('Plantilla guardada correctamente.');
+  } catch (e) {
+    alert(`Error guardando plantilla: ${e.message}`);
   }
 }
 
@@ -1089,6 +1156,7 @@ function renderFileList() {
     `;
     list.appendChild(item);
   });
+  updateStep3Summary();
 }
 
 // ================================================================
@@ -1097,11 +1165,13 @@ function renderFileList() {
 function updateStep3Summary() {
   const selected = getSelectedSubmissions();
   const box = document.getElementById('step3-summary');
+  const instructions = document.getElementById('instructions')?.value.trim();
   box.innerHTML = `
     <strong>📝 Resumen:</strong> Se corregirán <strong>${selected.length} entregas</strong>
     de la tarea <em>"${esc(state.task?.task || '')}"</em>
     (${esc(state.task?.course || '')}).
     ${state.refFiles.length > 0 ? `<br>📎 ${state.refFiles.length} archivo(s) de referencia adjunto(s).` : ''}
+    ${instructions ? `<br>🧭 Se aplicarán instrucciones personalizadas para esta corrección.` : ''}
     <br><span style="font-size:.8rem;color:#1e40af;margin-top:.25rem;display:block">
       ⏱ Estimado: ~${Math.ceil(selected.length * 0.5)} – ${Math.ceil(selected.length * 1)} minuto(s)
     </span>
