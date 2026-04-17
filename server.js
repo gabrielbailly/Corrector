@@ -668,7 +668,11 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
 // ============================================================
 async function callAI(prompt, files, onRetry = null) {
   const provider = getProvider();
-  if (provider === 'groq') return callGroq(prompt, files, 1, onRetry);
+  if (provider === 'groq') {
+    if (!getGroqKey()) throw new Error('Falta la API Key de Groq. Añade GROQ_API_KEY en las variables de entorno de Render.');
+    return callGroq(prompt, files, 1, onRetry);
+  }
+  if (!getGeminiKey()) throw new Error('Falta la API Key de Gemini. Añade GEMINI_API_KEY en las variables de entorno de Render (no basta con guardarla en ⚙️ Ajustes).');
   return callGemini(prompt, files, 1, onRetry);
 }
 
@@ -970,7 +974,7 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
           current: i + 1,
           total: toCorrect.length,
           student: sub.studentName,
-          message: `Corrigiendo a ${sub.studentName} con Groq IA…`,
+          message: `Corrigiendo a ${sub.studentName} con ${getProvider() === 'gemini' ? 'Gemini' : 'Groq'} IA…`,
         });
 
         // Llamar a Gemini (con callback de reintentos para actualizar el frontend)
@@ -1162,7 +1166,20 @@ ensureDirs().then(() => {
     console.log('║         CORRECTOR IA — Google Classroom          ║');
     console.log('╠══════════════════════════════════════════════════╣');
     console.log(`║  ✅ Servidor corriendo en http://localhost:${PORT}   ║`);
-    console.log('║  👉 Abre esa URL en tu navegador para empezar     ║');
-    console.log('╚══════════════════════════════════════════════════╝\n');
+    console.log('╚══════════════════════════════════════════════════╝');
+
+    // Chequeo de variables de entorno al arrancar
+    const provider = getProvider();
+    console.log(`\n  Proveedor IA : ${provider.toUpperCase()}`);
+    if (provider === 'gemini') {
+      if (getGeminiKey()) console.log('  Gemini key   : ✅ configurada');
+      else console.warn('  Gemini key   : ⚠️  FALTA — añade GEMINI_API_KEY en Render');
+    } else {
+      if (getGroqKey()) console.log('  Groq key     : ✅ configurada');
+      else console.warn('  Groq key     : ⚠️  FALTA — añade GROQ_API_KEY en Render');
+    }
+    if (!process.env.GOOGLE_CREDENTIALS) console.warn('  Google creds : ⚠️  FALTA — añade GOOGLE_CREDENTIALS en Render');
+    else console.log('  Google creds : ✅ configuradas');
+    console.log('');
   });
 });
