@@ -58,8 +58,8 @@ a{color:var(--blue);text-decoration:none}
 
 /* ========== FORM ELEMENTS ========== */
 label{display:block;font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:.4rem}
-input[type=text],input[type=url],textarea{width:100%;padding:.7rem 1rem;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:.9rem;color:var(--text);background:#fff;transition:border-color .2s,box-shadow .2s;outline:none}
-input[type=text]:focus,input[type=url]:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+input[type=text],input[type=url],textarea,select.task-select{width:100%;padding:.7rem 1rem;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:.9rem;color:var(--text);background:#fff;transition:border-color .2s,box-shadow .2s;outline:none}
+input[type=text]:focus,input[type=url]:focus,textarea:focus,select.task-select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
 textarea{resize:vertical;min-height:90px}
 .input-row{display:flex;gap:.75rem}
 .input-row input{flex:1}
@@ -367,6 +367,22 @@ textarea{resize:vertical;min-height:90px}
     </div>
 
     <div id="step2-content">
+      <div style="background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;margin-bottom:1rem">
+        <label>Seleccionar curso y tarea</label>
+        <div class="input-row">
+          <select id="course-select" class="task-select" onchange="handleCourseChange()">
+            <option value="">Selecciona un curso…</option>
+          </select>
+          <select id="coursework-select" class="task-select" disabled>
+            <option value="">Selecciona una tarea…</option>
+          </select>
+          <button class="btn btn-primary" id="btn-load-selected-task" onclick="loadSelectedTask()">Cargar</button>
+        </div>
+        <p class="text-muted mt-1">Elige primero el curso y después la tarea. Es la opción más cómoda para no copiar la URL.</p>
+      </div>
+
+      <div class="divider"></div>
+
       <label>URL de la tarea en Google Classroom</label>
       <div class="input-row">
         <input type="url" id="task-url" placeholder="https://classroom.google.com/c/XXXXX/a/YYYYY/details" />
@@ -501,6 +517,7 @@ let state = {
   selected: new Set(), // selected student IDs
   refFiles: [],      // reference file objects
   correctionOutput: null,
+  correctionStartedAt: null,
 };
 
 // ================================================================
@@ -717,6 +734,7 @@ function activateStep(n) {
 
 function goToStep2() {
   activateStep(2);
+  loadCourseOptions();
   document.getElementById('card-task').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -735,11 +753,61 @@ function goToStep3() {
 // ================================================================
 //  LOAD TASK
 // ================================================================
-async function loadTask() {
-  const url = document.getElementById('task-url').value.trim();
-  if (!url) return alert('Introduce la URL de la tarea.');
+async function loadCourseOptions() {
+  const select = document.getElementById('course-select');
+  if (!select || select.dataset.loaded === '1') return;
 
-  const btn = document.getElementById('btn-load-task');
+  try {
+    select.disabled = true;
+    select.innerHTML = '<option value="">Cargando cursos…</option>';
+    const r = await fetch('/api/my-courses');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudieron cargar los cursos');
+
+    const activeCourses = (data.courses || []).filter(c => c.state !== 'ARCHIVED');
+    select.innerHTML = '<option value="">Selecciona un curso…</option>' + activeCourses
+      .map(c => `<option value="${esc(c.id)}">${esc(c.name)}${c.section ? ` · ${esc(c.section)}` : ''}</option>`)
+      .join('');
+    select.disabled = false;
+    select.dataset.loaded = '1';
+  } catch (e) {
+    select.innerHTML = '<option value="">No se pudieron cargar los cursos</option>';
+    showAlertEl('task-alert', `Error cargando cursos: ${e.message}`, 'error');
+  }
+}
+
+async function handleCourseChange() {
+  const courseId = document.getElementById('course-select').value;
+  const taskSelect = document.getElementById('coursework-select');
+  hideAlert('task-alert');
+  taskSelect.innerHTML = '<option value="">Selecciona una tarea…</option>';
+  taskSelect.disabled = true;
+  if (!courseId) return;
+
+  try {
+    taskSelect.innerHTML = '<option value="">Cargando tareas…</option>';
+    const r = await fetch(`/api/course-work/${encodeURIComponent(courseId)}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'No se pudieron cargar las tareas');
+
+    const tasks = (data.tasks || []).filter(t => t.state !== 'DELETED');
+    taskSelect.innerHTML = '<option value="">Selecciona una tarea…</option>' + tasks
+      .map(t => `<option value="${esc(t.id)}">${esc(formatTaskOption(t))}</option>`)
+      .join('');
+    taskSelect.disabled = false;
+  } catch (e) {
+    taskSelect.innerHTML = '<option value="">No se pudieron cargar las tareas</option>';
+    showAlertEl('task-alert', `Error cargando tareas: ${e.message}`, 'error');
+  }
+}
+
+function formatTaskOption(task) {
+  const points = task.maxPoints !== null && task.maxPoints !== undefined ? ` · ${task.maxPoints} ptos` : '';
+  return `${task.title}${points}`;
+}
+
+async function loadTaskRequest(payload, buttonId) {
+  const btn = document.getElementById(buttonId);
   setLoading(btn, true, 'Cargando…');
   hideAlert('task-alert');
 
@@ -747,7 +815,7 @@ async function loadTask() {
     const r = await fetch('/api/load-task', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(payload),
     });
     const data = await r.json();
 
@@ -762,7 +830,6 @@ async function loadTask() {
     state.task = data;
     state.submissions = data.submissions;
     renderTaskInfo(data);
-
   } catch (e) {
     showAlertEl('task-alert', `Error de red: ${e.message}`, 'error');
   } finally {
@@ -770,7 +837,34 @@ async function loadTask() {
   }
 }
 
+async function loadTask() {
+  const url = document.getElementById('task-url').value.trim();
+  if (!url) return alert('Introduce la URL de la tarea.');
+
+  return loadTaskRequest({ url }, 'btn-load-task');
+}
+
+async function loadSelectedTask() {
+  const courseId = document.getElementById('course-select').value;
+  const courseWorkId = document.getElementById('coursework-select').value;
+  if (!courseId || !courseWorkId) {
+    return alert('Selecciona primero un curso y una tarea.');
+  }
+  return loadTaskRequest({ courseId, courseWorkId }, 'btn-load-selected-task');
+}
+
 function renderTaskInfo(data) {
+  const courseSelect = document.getElementById('course-select');
+  const taskSelect = document.getElementById('coursework-select');
+  if (courseSelect) courseSelect.value = data.courseId;
+  if (taskSelect && !Array.from(taskSelect.options).some(o => o.value === data.courseWorkId)) {
+    taskSelect.innerHTML += `<option value="${esc(data.courseWorkId)}">${esc(data.task)}</option>`;
+  }
+  if (taskSelect) {
+    taskSelect.value = data.courseWorkId;
+    taskSelect.disabled = false;
+  }
+
   document.getElementById('task-title').textContent = data.task;
   document.getElementById('task-course').textContent = `📚 ${data.course}`;
 
@@ -1018,7 +1112,7 @@ async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
   let res;
   try {
     res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${key}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1124,6 +1218,7 @@ async function callGroqBrowser(key, model, content, attempt = 1, onRetry = null)
 async function startCorrection() {
   const selected = getSelectedSubmissions();
   if (selected.length === 0) return alert('Selecciona al menos un alumno.');
+  state.correctionStartedAt = Date.now();
 
   // Swap UI
   document.getElementById('step3-content').classList.add('hidden');
@@ -1405,7 +1500,11 @@ function showResults(data) {
   `;
 
   const resList = document.getElementById('results-list');
+  const elapsed = formatElapsedTime(state.correctionStartedAt ? Date.now() - state.correctionStartedAt : 0);
   resList.innerHTML = `
+    <div class="alert alert-success">
+      ⏱ Corrección completada en <strong>${elapsed}</strong>.
+    </div>
     <p class="text-muted mt-1" style="font-size:.8rem">
       💡 Haz clic en "Ver corrección →" para abrir el informe de cada alumno.
       Desde ahí puedes imprimirlo o guardarlo como PDF.<br>
@@ -1494,6 +1593,15 @@ function showAlert(id, html, type) { showAlertEl(id, html, type); }
 function esc(str) {
   if (!str) return '';
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatElapsedTime(ms) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  if (seconds === 0) return `${minutes} min`;
+  return `${minutes} min ${seconds}s`;
 }
 </script>
 </body>

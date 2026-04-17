@@ -290,137 +290,176 @@ app.get('/api/my-courses', async (req, res) => {
   }
 });
 
+app.get('/api/course-work/:courseId', async (req, res) => {
+  try {
+    const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
+    const r = await classroom.courses.courseWork.list({
+      courseId: req.params.courseId,
+      pageSize: 100,
+    });
+    const tasks = (r.data.courseWork || []).map((w) => ({
+      id: w.id,
+      title: w.title || 'Sin titulo',
+      state: w.state || '',
+      maxPoints: w.maxPoints ?? null,
+      updateTime: w.updateTime || '',
+      dueDate: w.dueDate || null,
+    })).sort((a, b) => (b.updateTime || '').localeCompare(a.updateTime || ''));
+    res.json({ tasks });
+  } catch (e) {
+    const code = e.code || e.status;
+    if (code === 401) return res.status(401).json({ error: 'Sesion expirada. Vuelve a conectar tu cuenta.' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ============================================================
 //  CARGAR TAREA
 // ============================================================
 app.post('/api/load-task', async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).json({ error: 'URL requerida' });
+  const { url, courseId: bodyCourseId, courseWorkId: bodyCourseWorkId } = req.body;
+  let courseId = bodyCourseId;
+  let courseWorkId = bodyCourseWorkId;
 
-  const parsed = parseClassroomUrl(url);
-  if (!parsed) {
-    return res.status(400).json({
-      error:
-        'URL no válida. Debe tener el formato: https://classroom.google.com/c/{cursoId}/a/{tareaId}/details',
-    });
+  if (url) {
+    const parsed = parseClassroomUrl(url);
+    if (!parsed) {
+      return res.status(400).json({
+        error:
+          'URL no válida. Debe tener el formato: https://classroom.google.com/c/{cursoId}/a/{tareaId}/details',
+      });
+    }
+    courseId = parsed.courseId;
+    courseWorkId = parsed.courseWorkId;
   }
 
-  const { courseId, courseWorkId } = parsed;
+  if (!courseId || !courseWorkId) {
+    return res.status(400).json({ error: 'Debes indicar una URL o seleccionar curso y tarea.' });
+  }
 
   try {
-    const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
-
-    // Primero verificamos acceso al curso
-    let courseRes;
-    try {
-      courseRes = await classroom.courses.get({ id: courseId });
-    } catch (e) {
-      const code = e.code || e.status;
-      if (code === 404) {
-        // Intentar listar los cursos del profesor para mostrar diagnóstico
-        let courseList = [];
-        try {
-          const listRes = await classroom.courses.list({ teacherId: 'me', pageSize: 20 });
-          courseList = (listRes.data.courses || []).map(c => c.name);
-        } catch (_) {}
-        return res.status(404).json({
-          error: `Curso no encontrado (ID: ${courseId}). Posibles causas:\n` +
-            `1. Iniciaste sesión con una cuenta distinta a la del curso.\n` +
-            `2. No eres profesor de este curso.\n` +
-            (courseList.length ? `Cursos encontrados en tu cuenta: ${courseList.join(', ')}` : ''),
-          courseId,
-          courseWorkId,
-        });
-      }
-      throw e;
-    }
-
-    // Luego la tarea
-    let workRes;
-    try {
-      workRes = await classroom.courses.courseWork.get({ courseId, id: courseWorkId });
-    } catch (e) {
-      const code = e.code || e.status;
-      if (code === 404) {
-        return res.status(404).json({
-          error: `Tarea no encontrada en el curso "${courseRes.data.name}" (ID tarea: ${courseWorkId}).\n` +
-            `El curso sí existe pero no se encontró esa tarea. Asegúrate de copiar la URL completa desde la barra del navegador.`,
-          courseId,
-          courseWorkId,
-        });
-      }
-      throw e;
-    }
-
-    const submissionsRes = await classroom.courses.courseWork.studentSubmissions.list({
-      courseId,
-      courseWorkId,
-      pageSize: 100,
-    });
-
-    const rawSubmissions = submissionsRes.data.studentSubmissions || [];
-
-    // Obtener nombres de alumnos
-    let studentMap = {};
-    try {
-      const studentsRes = await classroom.courses.students.list({ courseId, pageSize: 200 });
-      (studentsRes.data.students || []).forEach((s) => {
-        studentMap[s.userId] = {
-          name: s.profile?.name?.fullName || s.profile?.name?.givenName || `Alumno`,
-          email: s.profile?.emailAddress || '',
-          photo: s.profile?.photoUrl || '',
-        };
-      });
-    } catch (e) {
-      console.warn('No se pudo obtener la lista de alumnos:', e.message);
-    }
-
-    const submissions = rawSubmissions.map((s) => {
-      const student = studentMap[s.userId] || { name: `Alumno_${s.userId.slice(-5)}`, email: '' };
-      const attachments = s.assignmentSubmission?.attachments || [];
-      const driveFiles = attachments
-        .filter((a) => a.driveFile)
-        .map((a) => ({
-          id: a.driveFile.driveFile?.id || a.driveFile.id,
-          title: a.driveFile.driveFile?.title || a.driveFile.title || 'Archivo',
-        }))
-        .filter((f) => f.id);
-
-      return {
-        id: s.id,
-        studentId: s.userId,
-        studentName: student.name,
-        studentEmail: student.email,
-        state: s.state,
-        late: s.late || false,
-        driveFiles,
-        hasSubmission: driveFiles.length > 0,
-      };
-    });
-
-    // Ordenar: entregados primero, luego por nombre
-    submissions.sort((a, b) => {
-      if (a.hasSubmission !== b.hasSubmission) return b.hasSubmission - a.hasSubmission;
-      return a.studentName.localeCompare(b.studentName, 'es');
-    });
-
-    res.json({
-      courseId,
-      courseWorkId,
-      course: courseRes.data.name,
-      task: workRes.data.title,
-      description: workRes.data.description || '',
-      maxPoints: workRes.data.maxPoints,
-      submissions,
-    });
+    const data = await loadTaskData(courseId, courseWorkId);
+    res.json(data);
   } catch (err) {
     console.error('Error al cargar tarea:', err.message);
     if (err.code === 401 || err.status === 401) {
       return res.status(401).json({ error: 'Sesión expirada. Por favor, vuelve a conectar tu cuenta.' });
     }
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({
+      error: err.message,
+      courseId: err.courseId,
+      courseWorkId: err.courseWorkId,
+    });
   }
 });
+
+async function loadTaskData(courseId, courseWorkId) {
+  const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
+  // Primero verificamos acceso al curso
+  let courseRes;
+  try {
+    courseRes = await classroom.courses.get({ id: courseId });
+  } catch (e) {
+    const code = e.code || e.status;
+    if (code === 404) {
+      let courseList = [];
+      try {
+        const listRes = await classroom.courses.list({ teacherId: 'me', pageSize: 20 });
+        courseList = (listRes.data.courses || []).map(c => c.name);
+      } catch (_) {}
+      const err = new Error(
+        `Curso no encontrado (ID: ${courseId}). Posibles causas:\n` +
+        `1. Iniciaste sesión con una cuenta distinta a la del curso.\n` +
+        `2. No eres profesor de este curso.\n` +
+        (courseList.length ? `Cursos encontrados en tu cuenta: ${courseList.join(', ')}` : '')
+      );
+      err.status = 404;
+      err.courseId = courseId;
+      err.courseWorkId = courseWorkId;
+      throw err;
+    }
+    throw e;
+  }
+
+  // Luego la tarea
+  let workRes;
+  try {
+    workRes = await classroom.courses.courseWork.get({ courseId, id: courseWorkId });
+  } catch (e) {
+    const code = e.code || e.status;
+    if (code === 404) {
+      const err = new Error(
+        `Tarea no encontrada en el curso "${courseRes.data.name}" (ID tarea: ${courseWorkId}).\n` +
+        `El curso sí existe pero no se encontró esa tarea. Asegúrate de copiar la URL completa desde la barra del navegador.`
+      );
+      err.status = 404;
+      err.courseId = courseId;
+      err.courseWorkId = courseWorkId;
+      throw err;
+    }
+    throw e;
+  }
+
+  const submissionsRes = await classroom.courses.courseWork.studentSubmissions.list({
+    courseId,
+    courseWorkId,
+    pageSize: 100,
+  });
+
+  const rawSubmissions = submissionsRes.data.studentSubmissions || [];
+
+  let studentMap = {};
+  try {
+    const studentsRes = await classroom.courses.students.list({ courseId, pageSize: 200 });
+    (studentsRes.data.students || []).forEach((s) => {
+      studentMap[s.userId] = {
+        name: s.profile?.name?.fullName || s.profile?.name?.givenName || 'Alumno',
+        email: s.profile?.emailAddress || '',
+        photo: s.profile?.photoUrl || '',
+      };
+    });
+  } catch (e) {
+    console.warn('No se pudo obtener la lista de alumnos:', e.message);
+  }
+
+  const submissions = rawSubmissions.map((s) => {
+    const student = studentMap[s.userId] || { name: `Alumno_${s.userId.slice(-5)}`, email: '' };
+    const attachments = s.assignmentSubmission?.attachments || [];
+    const driveFiles = attachments
+      .filter((a) => a.driveFile)
+      .map((a) => ({
+        id: a.driveFile.driveFile?.id || a.driveFile.id,
+        title: a.driveFile.driveFile?.title || a.driveFile.title || 'Archivo',
+      }))
+      .filter((f) => f.id);
+
+    return {
+      id: s.id,
+      studentId: s.userId,
+      studentName: student.name,
+      studentEmail: student.email,
+      state: s.state,
+      late: s.late || false,
+      driveFiles,
+      hasSubmission: driveFiles.length > 0,
+    };
+  });
+
+  submissions.sort((a, b) => {
+    if (a.hasSubmission !== b.hasSubmission) return b.hasSubmission - a.hasSubmission;
+    return a.studentName.localeCompare(b.studentName, 'es');
+  });
+
+  return {
+    courseId,
+    courseWorkId,
+    course: courseRes.data.name,
+    task: workRes.data.title,
+    description: workRes.data.description || '',
+    maxPoints: workRes.data.maxPoints,
+    submissions,
+  };
+}
 
 // ============================================================
 //  DESCARGAR ARCHIVO DE DRIVE
@@ -624,11 +663,11 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
 }
 
 // ============================================================
-//  GEMINI API  (gemini-2.0-flash-lite — 30 RPM gratis, soporta PDF nativo)
+//  GEMINI API  (gemini-3.1-flash-lite-preview, segun cuota disponible del proyecto)
 // ============================================================
 
 // Proactive rate-limiter: ensures at least MIN_GAP_MS between consecutive
-// Gemini requests so we don't burst into the 30 RPM limit.
+// Gemini requests so we don't burst into the configured RPM limit.
 let lastGeminiCallAt = 0;
 const GEMINI_MIN_GAP_MS = 4000; // conservative: ≤15 req/min
 
@@ -662,7 +701,7 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
 
   try {
     const res = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${key}`,
       {
         contents: [{ role: 'user', parts }],
         generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
