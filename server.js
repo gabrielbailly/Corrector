@@ -637,7 +637,7 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
         contents: [{ role: 'user', parts }],
         generationConfig: { temperature: 0.4, maxOutputTokens: 4096, responseMimeType: 'application/json' },
       },
-      { timeout: 120000 }
+      { timeout: 55000 }
     );
     const text = res.data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text) throw new Error('Respuesta vacía de Gemini');
@@ -878,6 +878,12 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
     } catch (e) {}
   };
 
+  // Keep-alive: prevents Render's reverse proxy from cutting the connection
+  // during long AI calls (proxy drops idle HTTP connections after ~60s)
+  const keepAlive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); if (res.flush) res.flush(); } catch (e) {}
+  }, 15000);
+
   try {
     const { courseId, courseWorkId, taskName, courseName, instructions } = req.body;
     const submissions = JSON.parse(req.body.submissionsJson || '[]');
@@ -1104,6 +1110,7 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
     send('error', { message: `Error: ${err.message}` });
   }
 
+  clearInterval(keepAlive);
   res.end();
 });
 
