@@ -888,6 +888,9 @@ function buildPrompt(taskName, courseName, instructions, numRef, numStudent) {
 REGLAS IMPORTANTES:
 - "nota" debe ser un número (ej: 7.5), no una cadena
 - Si el trabajo no puede evaluarse, "nota" debe ser null
+- Si el material de referencia incluye una rúbrica, refleja en la corrección detallada la nota o valoración de cada criterio relevante
+- En "correccion_detallada" separa claramente las ideas por apartados, preguntas o criterios, usando saltos de línea
+- En "feedforward" separa los consejos en pasos concretos o viñetas, una idea por línea
 - Sé específico, constructivo y motivador
 - Responde SIEMPRE en español
 - Responde ÚNICAMENTE con el JSON, sin texto antes ni después`;
@@ -916,6 +919,28 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
   const listHtml = (arr, cls) => {
     if (!arr || !arr.length) return `<li class="${cls}">—</li>`;
     return arr.map((item) => `<li class="${cls}">${escapeHtml(item)}</li>`).join('');
+  };
+
+  const formatRichText = (value, cls) => {
+    const text = String(value || '').trim();
+    if (!text) return `<p class="rich-p">No disponible</p>`;
+    const blocks = text.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
+    return blocks.map((block) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+      const bulletLines = lines.filter((line) => /^([-*•]|\d+[.)])\s+/.test(line));
+      if (bulletLines.length === lines.length) {
+        const items = lines
+          .map((line) => line.replace(/^([-*•]|\d+[.)])\s+/, ''))
+          .map((line) => `<li>${escapeHtml(line)}</li>`)
+          .join('');
+        return `<ul class="rich-list ${cls}">${items}</ul>`;
+      }
+      if (lines.length > 1 && lines.every((line) => /:/.test(line) && line.length <= 140)) {
+        const items = lines.map((line) => `<li>${escapeHtml(line)}</li>`).join('');
+        return `<ul class="rich-list ${cls}">${items}</ul>`;
+      }
+      return `<p class="rich-p">${lines.map((line) => escapeHtml(line)).join('<br>')}</p>`;
+    }).join('');
   };
 
   return `<!DOCTYPE html>
@@ -947,6 +972,11 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
   .text-block{font-size:.9rem;color:#334155;white-space:pre-wrap}
   .bg-gray{background:#f8fafc;padding:.75rem .85rem;border-radius:.5rem;border:1px solid #e2e8f0}
   .bg-blue{background:#eff6ff;padding:.75rem .85rem;border-radius:.5rem;border:1px solid #bfdbfe}
+  .rich-p{font-size:.9rem;color:#334155;margin:0 0 .55rem 0}
+  .rich-p:last-child{margin-bottom:0}
+  .rich-list{margin:0 0 .55rem 0;padding-left:1.1rem;color:#334155}
+  .rich-list:last-child{margin-bottom:0}
+  .rich-list li{margin:.18rem 0;padding-left:.15rem}
   .tag{display:inline-block;font-size:.75rem;font-weight:600;padding:.2rem .6rem;border-radius:2rem;margin:.15rem}
   ul.feedback-list{list-style:none}
   ul.feedback-list li{padding:.48rem .75rem;margin-bottom:.28rem;border-radius:.5rem;font-size:.86rem;position:relative;padding-left:1.55rem}
@@ -1037,12 +1067,12 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
 
   <div class="card">
     <div class="card-title" style="color:#1e293b">🔍 Corrección detallada</div>
-    <div class="text-block bg-gray">${escapeHtml(correction.correccion_detallada || 'No disponible')}</div>
+    <div class="bg-gray">${formatRichText(correction.correccion_detallada, 'rich-gray')}</div>
   </div>
 
   <div class="card">
     <div class="card-title" style="color:#2563eb">🚀 Feedforward &mdash; Cómo mejorar</div>
-    <div class="text-block bg-blue">${escapeHtml(correction.feedforward || 'No disponible')}</div>
+    <div class="bg-blue">${formatRichText(correction.feedforward, 'rich-blue')}</div>
   </div>
 
   <div class="card no-print">
