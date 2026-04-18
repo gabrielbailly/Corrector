@@ -4,6 +4,10 @@ services:
     runtime: node
     buildCommand: npm install
     startCommand: node server.js
+    disk:
+      name: corrector-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -17,3 +21,5 @@ services:
         sync: false          # contenido completo del client_secret_*.json
       - key: GOOGLE_TOKEN
         sync: false          # se rellena después del primer login
+      - key: DATA_DIR
+        value: /var/data

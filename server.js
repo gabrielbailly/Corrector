@@ -15,6 +15,7 @@ try { sharp = require('sharp'); } catch (e) { console.warn('sharp no disponible 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DATA_DIR = process.env.DATA_DIR || __dirname;
 
 // ============================================================
 //  CONFIGURACIÓN
@@ -23,8 +24,8 @@ const CREDENTIALS_PATH = path.join(
   __dirname,
   'client_secret_159626766732-hfshui318569lqjpapubkh0knkoct1kv.apps.googleusercontent.com.json'
 );
-const TOKEN_PATH  = path.join(__dirname, 'token.json');
-const CONFIG_PATH = path.join(__dirname, 'config.json');
+const TOKEN_PATH  = path.join(DATA_DIR, 'token.json');
+const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 // En producción (Railway) usar REDIRECT_URI como variable de entorno
 const REDIRECT_URI = process.env.REDIRECT_URI || `http://localhost:${PORT}/auth/callback`;
 
@@ -32,7 +33,12 @@ const REDIRECT_URI = process.env.REDIRECT_URI || `http://localhost:${PORT}/auth/
 let appConfig = {};
 try { appConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch (e) {}
 function saveConfig() {
-  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(appConfig, null, 2)); } catch (e) {}
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(appConfig, null, 2));
+  } catch (e) {
+    console.error('No se pudo guardar config.json:', e.message);
+  }
 }
 function getGroqKey() {
   // Prioridad: variable de entorno (Railway) > config.json (local)
@@ -56,6 +62,9 @@ function getCurrentUserKey() {
   const email = String(oauth2Client.credentials?.email || '').trim().toLowerCase();
   return email || 'local';
 }
+function getTemplateUserKey(req) {
+  return hasActiveSession(req) ? getCurrentUserKey() : 'local';
+}
 function ensureInstructionTemplateStore() {
   if (!appConfig.instructionTemplatesByUser || typeof appConfig.instructionTemplatesByUser !== 'object') {
     appConfig.instructionTemplatesByUser = {};
@@ -76,6 +85,18 @@ function getInstructionTemplates(userKey = getCurrentUserKey()) {
 function setInstructionTemplates(templates, userKey = getCurrentUserKey()) {
   ensureInstructionTemplateStore();
   appConfig.instructionTemplatesByUser[userKey] = templates;
+}
+function getMergedTemplatesForUser(userKey) {
+  ensureInstructionTemplateStore();
+  const own = getInstructionTemplates(userKey);
+  if (userKey === 'local') return own;
+  const localTemplates = getInstructionTemplates('local');
+  if (!localTemplates.length) return own;
+  const merged = [...own];
+  for (const tpl of localTemplates) {
+    if (!merged.some((item) => item.name === tpl.name)) merged.push(tpl);
+  }
+  return merged;
 }
 function normalizeInstructionTemplate(template) {
   return {
@@ -152,7 +173,9 @@ function loadToken() {
       oauth2Client.setCredentials(token);
       return true;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('No se pudo cargar token:', e.message);
+  }
   return false;
 }
 loadToken();
@@ -164,10 +187,13 @@ oauth2Client.on('tokens', (tokens) => {
     const current = oauth2Client.credentials || {};
     const merged = { ...current, ...tokens };
     // Guardar en disco (desarrollo)
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(merged));
     // Exponer el token actualizado para que el usuario lo copie a Render
     appConfig._latestToken = JSON.stringify(merged);
-  } catch (e) {}
+  } catch (e) {
+    console.error('No se pudo actualizar token:', e.message);
+  }
 });
 
 // ============================================================
@@ -223,6 +249,7 @@ app.get('/auth/callback', async (req, res) => {
       tokens.name = info.data.name;
       oauth2Client.setCredentials(tokens);
     } catch (e) {}
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
     activeSessionId = crypto.randomUUID();
     res.cookie('corrector_session', activeSessionId, {
@@ -331,7 +358,12 @@ app.post('/api/config', express.json(), (req, res) => {
 });
 
 app.get('/api/instruction-templates', (req, res) => {
-  const userKey = getCurrentUserKey();
+  const userKey = getTemplateUserKey(req);
+  const mergedTemplates = getMergedTemplatesForUser(userKey);
+  if (userKey !== 'local' && mergedTemplates.length !== getInstructionTemplates(userKey).length) {
+    setInstructionTemplates(mergedTemplates, userKey);
+    saveConfig();
+  }
   const templates = [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   res.json({ templates, userKey });
 });
@@ -342,7 +374,7 @@ app.post('/api/instruction-templates', express.json({ limit: '256kb' }), (req, r
     return res.status(400).json({ error: 'Debes indicar un nombre y unas instrucciones.' });
   }
 
-  const userKey = getCurrentUserKey();
+  const userKey = getTemplateUserKey(req);
   const templates = getInstructionTemplates(userKey).filter((t) => t.name !== normalized.name);
   templates.push(normalized);
   setInstructionTemplates(templates.slice(-50), userKey);
@@ -353,7 +385,7 @@ app.post('/api/instruction-templates', express.json({ limit: '256kb' }), (req, r
 app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Falta el nombre de la plantilla.' });
-  const userKey = getCurrentUserKey();
+  const userKey = getTemplateUserKey(req);
   const templates = getInstructionTemplates(userKey);
   const next = templates.filter((t) => t.name !== name);
   if (next.length === templates.length) {
