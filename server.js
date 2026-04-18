@@ -51,8 +51,30 @@ const GROQ_MODEL_DEFAULT = 'meta-llama/llama-4-scout-17b-16e-instruct';
 function getGroqModel() {
   return appConfig.groqModel || GROQ_MODEL_DEFAULT;
 }
-function getInstructionTemplates() {
-  return Array.isArray(appConfig.instructionTemplates) ? appConfig.instructionTemplates : [];
+function getCurrentUserKey() {
+  const email = String(oauth2Client.credentials?.email || '').trim().toLowerCase();
+  return email || 'local';
+}
+function ensureInstructionTemplateStore() {
+  if (!appConfig.instructionTemplatesByUser || typeof appConfig.instructionTemplatesByUser !== 'object') {
+    appConfig.instructionTemplatesByUser = {};
+  }
+  if (Array.isArray(appConfig.instructionTemplates) && appConfig.instructionTemplates.length) {
+    const key = getCurrentUserKey();
+    if (!Array.isArray(appConfig.instructionTemplatesByUser[key]) || !appConfig.instructionTemplatesByUser[key].length) {
+      appConfig.instructionTemplatesByUser[key] = appConfig.instructionTemplates;
+    }
+    delete appConfig.instructionTemplates;
+    saveConfig();
+  }
+}
+function getInstructionTemplates(userKey = getCurrentUserKey()) {
+  ensureInstructionTemplateStore();
+  return Array.isArray(appConfig.instructionTemplatesByUser[userKey]) ? appConfig.instructionTemplatesByUser[userKey] : [];
+}
+function setInstructionTemplates(templates, userKey = getCurrentUserKey()) {
+  ensureInstructionTemplateStore();
+  appConfig.instructionTemplatesByUser[userKey] = templates;
 }
 function normalizeInstructionTemplate(template) {
   return {
@@ -176,6 +198,7 @@ app.get('/auth/callback', async (req, res) => {
       const info = await oauth2.userinfo.get();
       tokens.email = info.data.email;
       tokens.name = info.data.name;
+      oauth2Client.setCredentials(tokens);
     } catch (e) {}
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
     // En producción, redirigir a la página de exportar token
@@ -278,8 +301,9 @@ app.post('/api/config', express.json(), (req, res) => {
 });
 
 app.get('/api/instruction-templates', (req, res) => {
-  const templates = [...getInstructionTemplates()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  res.json({ templates });
+  const userKey = getCurrentUserKey();
+  const templates = [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  res.json({ templates, userKey });
 });
 
 app.post('/api/instruction-templates', express.json({ limit: '256kb' }), (req, res) => {
@@ -288,24 +312,26 @@ app.post('/api/instruction-templates', express.json({ limit: '256kb' }), (req, r
     return res.status(400).json({ error: 'Debes indicar un nombre y unas instrucciones.' });
   }
 
-  const templates = getInstructionTemplates().filter((t) => t.name !== normalized.name);
+  const userKey = getCurrentUserKey();
+  const templates = getInstructionTemplates(userKey).filter((t) => t.name !== normalized.name);
   templates.push(normalized);
-  appConfig.instructionTemplates = templates.slice(-50);
+  setInstructionTemplates(templates.slice(-50), userKey);
   saveConfig();
-  res.json({ success: true, templates: [...appConfig.instructionTemplates].sort((a, b) => a.name.localeCompare(b.name, 'es')) });
+  res.json({ success: true, templates: [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es')), userKey });
 });
 
 app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Falta el nombre de la plantilla.' });
-  const templates = getInstructionTemplates();
+  const userKey = getCurrentUserKey();
+  const templates = getInstructionTemplates(userKey);
   const next = templates.filter((t) => t.name !== name);
   if (next.length === templates.length) {
     return res.status(404).json({ error: 'No se encontró la plantilla.' });
   }
-  appConfig.instructionTemplates = next;
+  setInstructionTemplates(next, userKey);
   saveConfig();
-  res.json({ success: true, templates: [...next].sort((a, b) => a.name.localeCompare(b.name, 'es')) });
+  res.json({ success: true, templates: [...next].sort((a, b) => a.name.localeCompare(b.name, 'es')), userKey });
 });
 
 app.get('/api/ai-config', (req, res) => {
