@@ -1368,6 +1368,19 @@ async function callGeminiBrowser(key, parts, attempt = 1, onRetry = null) {
     throw new Error(`${apiMsg}. Límite de Gemini alcanzado tras ${MAX_ATTEMPTS} intentos.`);
   }
 
+  if (res.status === 503) {
+    const body = await res.json().catch(() => ({}));
+    const apiMsg = body.error?.message || 'Gemini saturado temporalmente';
+    const waitSec = Math.min(15 * attempt, 60);
+    if (attempt <= MAX_ATTEMPTS) {
+      if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
+      await _sleepBrowser(waitSec * 1000);
+      _lastGeminiBrowserCall = Date.now();
+      return callGeminiBrowser(key, parts, attempt + 1, onRetry);
+    }
+    throw new Error(`${apiMsg}. Gemini siguió saturado tras ${MAX_ATTEMPTS} intentos.`);
+  }
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(`Gemini ${res.status}: ${body.error?.message || res.statusText}`);

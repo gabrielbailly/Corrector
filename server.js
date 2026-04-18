@@ -836,6 +836,15 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
       lastGeminiCallAt = Date.now(); // reset throttle after the long wait
       return callGemini(prompt, files, attempt + 1, onRetry);
     }
+    if (status === 503 && attempt <= MAX_ATTEMPTS) {
+      const waitSec = Math.min(15 * attempt, 60);
+      const geminiMsg = err.response?.data?.error?.message || 'Gemini saturado temporalmente';
+      console.warn('Gemini 503 body:', JSON.stringify(err.response?.data || {}));
+      if (onRetry) onRetry({ attempt, max: MAX_ATTEMPTS, wait: waitSec });
+      await sleep(waitSec * 1000);
+      lastGeminiCallAt = Date.now();
+      return callGemini(prompt, files, attempt + 1, onRetry);
+    }
     if (status === 401) throw new Error('API Key de Gemini inválida. Revisa la configuración.');
     const geminiMsg = err.response?.data?.error?.message || err.message;
     console.error('Gemini error:', status, geminiMsg);
