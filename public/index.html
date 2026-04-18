@@ -613,7 +613,6 @@ let state = {
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   checkConfig();
-  loadInstructionTemplates();
   handleUrlParams();
 });
 
@@ -808,6 +807,7 @@ function handleUrlParams() {
 
 function continueWithoutGoogle() {
   state.user = { authenticated: false, localMode: true };
+  loadInstructionTemplates();
   markStepDone(1);
   goToStep2();
 }
@@ -818,6 +818,7 @@ async function checkAuth() {
     const data = await r.json();
     state.user = data;
     updateAuthUI(data);
+    await loadInstructionTemplates();
   } catch (e) {
     console.error('Auth check failed', e);
   }
