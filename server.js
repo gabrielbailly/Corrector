@@ -7,6 +7,7 @@ const path = require('path');
 const XLSX = require('xlsx');
 const multer = require('multer');
 const archiver = require('archiver');
+const crypto = require('crypto');
 let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (e) {}
 let sharp;
@@ -114,6 +115,28 @@ const oauth2Client = new google.auth.OAuth2(
   credentials.client_secret,
   REDIRECT_URI
 );
+let activeSessionId = null;
+
+function readCookie(req, name) {
+  const raw = req.headers.cookie || '';
+  for (const part of raw.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k === name) return decodeURIComponent(rest.join('='));
+  }
+  return '';
+}
+
+function hasActiveSession(req) {
+  return !!activeSessionId && readCookie(req, 'corrector_session') === activeSessionId;
+}
+
+function requireGoogleSession(req, res) {
+  if (!hasActiveSession(req) || !oauth2Client.credentials?.access_token) {
+    res.status(401).json({ error: 'Sesión expirada. Vuelve a conectar tu cuenta.' });
+    return false;
+  }
+  return true;
+}
 
 function loadToken() {
   try {
@@ -164,7 +187,7 @@ const upload = multer({
 // ============================================================
 app.get('/auth/status', (req, res) => {
   const creds = oauth2Client.credentials;
-  const authenticated = !!(creds && creds.access_token);
+  const authenticated = !!(creds && creds.access_token && hasActiveSession(req));
   res.json({ authenticated, email: creds?.email || null, name: creds?.name || null });
 });
 
@@ -201,9 +224,14 @@ app.get('/auth/callback', async (req, res) => {
       oauth2Client.setCredentials(tokens);
     } catch (e) {}
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
-    // En producción, redirigir a la página de exportar token
-    const isProd = process.env.NODE_ENV === 'production';
-    res.redirect(isProd ? '/?auth=success&showtoken=1' : '/?auth=success');
+    activeSessionId = crypto.randomUUID();
+    res.cookie('corrector_session', activeSessionId, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+    });
+    res.redirect('/?auth=success');
   } catch (err) {
     console.error('OAuth callback error:', err.message);
     res.redirect(`/?auth=error&msg=${encodeURIComponent(err.message)}`);
@@ -214,7 +242,9 @@ app.post('/auth/logout', (req, res) => {
   try {
     if (fs.existsSync(TOKEN_PATH)) fs.unlinkSync(TOKEN_PATH);
     oauth2Client.setCredentials({});
+    activeSessionId = null;
   } catch (e) {}
+  res.clearCookie('corrector_session', { path: '/' });
   res.json({ success: true });
 });
 
@@ -348,6 +378,7 @@ app.get('/api/ai-config', (req, res) => {
 //  DIAGNÓSTICO: listar cursos del usuario
 // ============================================================
 app.get('/api/my-courses', async (req, res) => {
+  if (!requireGoogleSession(req, res)) return;
   try {
     const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
     const r = await classroom.courses.list({ teacherId: 'me', pageSize: 50 });
@@ -364,6 +395,7 @@ app.get('/api/my-courses', async (req, res) => {
 });
 
 app.get('/api/course-work/:courseId', async (req, res) => {
+  if (!requireGoogleSession(req, res)) return;
   try {
     const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
     const r = await classroom.courses.courseWork.list({
@@ -390,6 +422,7 @@ app.get('/api/course-work/:courseId', async (req, res) => {
 //  CARGAR TAREA
 // ============================================================
 app.post('/api/load-task', async (req, res) => {
+  if (!requireGoogleSession(req, res)) return;
   const { url, courseId: bodyCourseId, courseWorkId: bodyCourseWorkId } = req.body;
   let courseId = bodyCourseId;
   let courseWorkId = bodyCourseWorkId;
@@ -1288,7 +1321,7 @@ app.post('/api/correct', upload.array('referenceFiles', 10), async (req, res) =>
 // ============================================================
 
 app.post('/api/student-files', express.json({ limit: '2mb' }), async (req, res) => {
-  if (!oauth2Client.credentials?.access_token) return res.status(401).json({ error: 'No autenticado con Google' });
+  if (!requireGoogleSession(req, res)) return;
   const { submission } = req.body;
   if (!submission) return res.status(400).json({ error: 'Falta submission' });
 

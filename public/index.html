@@ -783,63 +783,11 @@ function handleUrlParams() {
   if (p.get('auth') === 'success') {
     history.replaceState({}, '', '/');
     checkAuth();
-    if (p.get('showtoken') === '1') showTokenExport();
   } else if (p.get('auth') === 'error') {
     const msg = p.get('msg') || 'Error desconocido';
     showAlert('auth-alert', `Error al conectar: ${msg}`, 'error');
     history.replaceState({}, '', '/');
   }
-}
-
-async function showTokenExport() {
-  try {
-    const r = await fetch('/auth/token-export');
-    const d = await r.json();
-    if (!d.token) return;
-
-    // Crear modal informativo
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-      position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;
-      display:flex;align-items:center;justify-content:center;padding:1rem`;
-    modal.innerHTML = `
-      <div style="background:#fff;border-radius:1rem;padding:2rem;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-        <h3 style="margin-bottom:.5rem;font-size:1.1rem">🔑 Paso final para Render</h3>
-        <p style="font-size:.875rem;color:#475569;margin-bottom:1rem">
-          Copia este valor y pégalo en Render como variable de entorno
-          <strong>GOOGLE_TOKEN</strong>.<br>
-          Solo necesitas hacerlo una vez (o cuando caduque la sesión).
-        </p>
-        <textarea id="token-export-val" readonly
-          style="width:100%;height:90px;font-size:.72rem;font-family:monospace;padding:.6rem;border:1.5px solid #e2e8f0;border-radius:.5rem;resize:none;background:#f8fafc"
-        >${d.token}</textarea>
-        <div style="display:flex;gap:.75rem;margin-top:1rem">
-          <button onclick="copyToken()" style="flex:1;padding:.75rem;background:#2563eb;color:#fff;border:none;border-radius:.5rem;font-weight:600;cursor:pointer;font-size:.9rem">
-            📋 Copiar al portapapeles
-          </button>
-          <button onclick="this.closest('[data-modal]').remove()" style="padding:.75rem 1.25rem;background:#f1f5f9;border:none;border-radius:.5rem;cursor:pointer;font-size:.9rem">
-            Cerrar
-          </button>
-        </div>
-        <p style="font-size:.75rem;color:#94a3b8;margin-top:.75rem">
-          En Render → tu servicio → Environment → edita GOOGLE_TOKEN → pega el valor → Save Changes
-        </p>
-      </div>`;
-    modal.dataset.modal = '1';
-    modal.querySelector('[data-modal]');
-    // Cerrar al hacer clic fuera
-    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-    document.body.appendChild(modal);
-  } catch (e) {}
-}
-
-function copyToken() {
-  const ta = document.getElementById('token-export-val');
-  ta.select();
-  navigator.clipboard.writeText(ta.value).then(() => {
-    const btn = ta.nextElementSibling?.querySelector('button');
-    if (btn) { btn.textContent = '✅ Copiado'; setTimeout(() => btn.textContent = '📋 Copiar al portapapeles', 2000); }
-  });
 }
 
 function continueWithoutGoogle() {
