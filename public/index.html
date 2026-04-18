@@ -24,11 +24,17 @@ a{color:var(--blue);text-decoration:none}
 
 /* ========== HEADER ========== */
 .top-bar{background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);color:#fff;padding:0 1.5rem;height:64px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
-.logo{display:flex;align-items:center;gap:.75rem;font-weight:700;font-size:1.1rem}
+.logo{display:flex;align-items:center;gap:.75rem;font-weight:700;font-size:1.1rem;min-width:0;color:#fff}
 .logo-icon{width:36px;height:36px;background:rgba(255,255,255,.2);border-radius:.5rem;display:flex;align-items:center;justify-content:center;font-size:1.2rem}
-.user-pill{display:flex;align-items:center;gap:.6rem;background:rgba(255,255,255,.15);padding:.35rem .75rem .35rem .5rem;border-radius:2rem;font-size:.85rem;cursor:pointer;border:1px solid rgba(255,255,255,.25);transition:background .2s}
+.logo-text{min-width:0;color:#fff}
+.logo-title{color:#fff;line-height:1.05}
+.logo-subtitle{font-size:.7rem;opacity:.9;font-weight:500;color:rgba(255,255,255,.92);line-height:1.15}
+.top-actions{display:flex;align-items:center;gap:.6rem;min-width:0;flex-shrink:1}
+.user-pill{display:flex;align-items:center;gap:.6rem;background:rgba(255,255,255,.15);padding:.35rem .75rem .35rem .5rem;border-radius:2rem;font-size:.85rem;cursor:pointer;border:1px solid rgba(255,255,255,.25);transition:background .2s;color:#fff;max-width:100%}
 .user-pill:hover{background:rgba(255,255,255,.25)}
 .user-avatar{width:26px;height:26px;background:rgba(255,255,255,.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700}
+.pill-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff}
+.header-user-wrap{min-width:0;max-width:240px}
 
 /* ========== LAYOUT ========== */
 .page{max-width:860px;margin:0 auto;padding:2rem 1rem 4rem}
@@ -203,6 +209,16 @@ textarea{resize:vertical;min-height:90px}
 [data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;font-size:.75rem;padding:.3rem .6rem;border-radius:.375rem;white-space:nowrap;z-index:50;pointer-events:none}
 
 @media(max-width:600px){
+  .top-bar{padding:0 .75rem;gap:.5rem}
+  .logo{flex:1;min-width:0;gap:.55rem}
+  .logo-icon{width:32px;height:32px;font-size:1rem;flex-shrink:0}
+  .logo-title{font-size:.98rem}
+  .logo-subtitle{font-size:.62rem;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .top-actions{gap:.35rem}
+  .user-pill{padding:.3rem .55rem .3rem .4rem;font-size:.78rem;min-width:0}
+  .header-user-wrap{max-width:118px}
+  #groq-status-pill{display:inline-block;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #header-email{display:inline-block;max-width:82px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .steps::before{display:none}
   .steps{gap:.5rem}
   .dot-label{display:none}
@@ -217,19 +233,19 @@ textarea{resize:vertical;min-height:90px}
 <header class="top-bar">
   <div class="logo">
     <div class="logo-icon">🎓</div>
-    <div>
-      <div>Corrector IA</div>
-      <div style="font-size:.7rem;opacity:.7;font-weight:400">Asistente para la corrección de tareas y exámenes</div>
+    <div class="logo-text">
+      <div class="logo-title">Corrector IA</div>
+      <div class="logo-subtitle">Asistente para la corrección de tareas y exámenes</div>
     </div>
   </div>
-  <div style="display:flex;align-items:center;gap:.6rem">
+  <div class="top-actions">
     <button class="user-pill" onclick="toggleSettings()" title="Configurar proveedor de IA">
-      ⚙️ <span id="groq-status-pill">Ajustes</span>
+      <span>⚙️</span> <span class="pill-text" id="groq-status-pill">Ajustes</span>
     </button>
-    <div id="header-user" class="hidden">
+    <div id="header-user" class="hidden header-user-wrap">
       <button class="user-pill" onclick="handleLogout()">
         <div class="user-avatar" id="header-avatar">?</div>
-        <span id="header-email">usuario</span>
+        <span class="pill-text" id="header-email">usuario</span>
         <span style="opacity:.6;font-size:.8rem">· Salir</span>
       </button>
     </div>
