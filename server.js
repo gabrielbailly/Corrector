@@ -8,6 +8,7 @@ const XLSX = require('xlsx');
 const multer = require('multer');
 const archiver = require('archiver');
 const crypto = require('crypto');
+const { Pool } = require('pg');
 let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (e) {}
 let sharp;
@@ -16,6 +17,7 @@ try { sharp = require('sharp'); } catch (e) { console.warn('sharp no disponible 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || __dirname;
+const DATABASE_URL = process.env.DATABASE_URL || '';
 
 // ============================================================
 //  CONFIGURACIÓN
@@ -103,6 +105,109 @@ function normalizeInstructionTemplate(template) {
     name: String(template?.name || '').trim().slice(0, 80),
     text: String(template?.text || '').trim().slice(0, 20000),
   };
+}
+const templateDb = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+    })
+  : null;
+let templateDbReady = null;
+
+async function initTemplateDb() {
+  if (!templateDb) return false;
+  if (!templateDbReady) {
+    templateDbReady = (async () => {
+      await templateDb.query(`
+        CREATE TABLE IF NOT EXISTS instruction_templates (
+          id BIGSERIAL PRIMARY KEY,
+          user_key TEXT NOT NULL,
+          name TEXT NOT NULL,
+          text TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(user_key, name)
+        )
+      `);
+      await templateDb.query(`
+        CREATE INDEX IF NOT EXISTS instruction_templates_user_key_idx
+        ON instruction_templates (user_key)
+      `);
+      console.log('Plantillas: PostgreSQL listo');
+      return true;
+    })().catch((err) => {
+      console.error('No se pudo inicializar PostgreSQL para plantillas:', err.message);
+      templateDbReady = null;
+      return false;
+    });
+  }
+  return templateDbReady;
+}
+
+async function listInstructionTemplates(userKey) {
+  if (templateDb && await initTemplateDb()) {
+    const result = await templateDb.query(
+      `SELECT name, text FROM instruction_templates WHERE user_key = $1 ORDER BY name ASC`,
+      [userKey]
+    );
+    return result.rows;
+  }
+  return [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+async function saveInstructionTemplateForUser(userKey, template) {
+  if (templateDb && await initTemplateDb()) {
+    await templateDb.query(
+      `INSERT INTO instruction_templates (user_key, name, text)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_key, name)
+       DO UPDATE SET text = EXCLUDED.text, updated_at = NOW()`,
+      [userKey, template.name, template.text]
+    );
+    return listInstructionTemplates(userKey);
+  }
+  const templates = getInstructionTemplates(userKey).filter((t) => t.name !== template.name);
+  templates.push(template);
+  setInstructionTemplates(templates.slice(-50), userKey);
+  saveConfig();
+  return [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+async function deleteInstructionTemplateForUser(userKey, name) {
+  if (templateDb && await initTemplateDb()) {
+    const result = await templateDb.query(
+      `DELETE FROM instruction_templates WHERE user_key = $1 AND name = $2`,
+      [userKey, name]
+    );
+    if (result.rowCount === 0) return null;
+    return listInstructionTemplates(userKey);
+  }
+  const templates = getInstructionTemplates(userKey);
+  const next = templates.filter((t) => t.name !== name);
+  if (next.length === templates.length) return null;
+  setInstructionTemplates(next, userKey);
+  saveConfig();
+  return [...next].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+async function backfillTemplatesToDb() {
+  if (!templateDb || !(await initTemplateDb())) return;
+  ensureInstructionTemplateStore();
+  const entries = Object.entries(appConfig.instructionTemplatesByUser || {});
+  if (!entries.length) return;
+  for (const [userKey, templates] of entries) {
+    for (const tpl of templates || []) {
+      const normalized = normalizeInstructionTemplate(tpl);
+      if (!normalized.name || !normalized.text) continue;
+      await templateDb.query(
+        `INSERT INTO instruction_templates (user_key, name, text)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_key, name)
+         DO UPDATE SET text = EXCLUDED.text, updated_at = NOW()`,
+        [userKey, normalized.name, normalized.text]
+      );
+    }
+  }
 }
 
 const SCOPES = [
@@ -357,43 +462,52 @@ app.post('/api/config', express.json(), (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/instruction-templates', (req, res) => {
+app.get('/api/instruction-templates', async (req, res) => {
   const userKey = getTemplateUserKey(req);
-  const mergedTemplates = getMergedTemplatesForUser(userKey);
-  if (userKey !== 'local' && mergedTemplates.length !== getInstructionTemplates(userKey).length) {
-    setInstructionTemplates(mergedTemplates, userKey);
-    saveConfig();
+  try {
+    let templates = await listInstructionTemplates(userKey);
+    if (userKey !== 'local' && !templateDb) {
+      const mergedTemplates = getMergedTemplatesForUser(userKey);
+      if (mergedTemplates.length !== getInstructionTemplates(userKey).length) {
+        setInstructionTemplates(mergedTemplates, userKey);
+        saveConfig();
+      }
+      templates = [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }
+    res.json({ templates, userKey });
+  } catch (e) {
+    res.status(500).json({ error: 'No se pudieron cargar las plantillas.' });
   }
-  const templates = [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  res.json({ templates, userKey });
 });
 
-app.post('/api/instruction-templates', express.json({ limit: '256kb' }), (req, res) => {
+app.post('/api/instruction-templates', express.json({ limit: '256kb' }), async (req, res) => {
   const normalized = normalizeInstructionTemplate(req.body || {});
   if (!normalized.name || !normalized.text) {
     return res.status(400).json({ error: 'Debes indicar un nombre y unas instrucciones.' });
   }
 
   const userKey = getTemplateUserKey(req);
-  const templates = getInstructionTemplates(userKey).filter((t) => t.name !== normalized.name);
-  templates.push(normalized);
-  setInstructionTemplates(templates.slice(-50), userKey);
-  saveConfig();
-  res.json({ success: true, templates: [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es')), userKey });
+  try {
+    const templates = await saveInstructionTemplateForUser(userKey, normalized);
+    res.json({ success: true, templates, userKey });
+  } catch (e) {
+    res.status(500).json({ error: 'No se pudo guardar la plantilla.' });
+  }
 });
 
-app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), (req, res) => {
+app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), async (req, res) => {
   const name = String(req.body?.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Falta el nombre de la plantilla.' });
   const userKey = getTemplateUserKey(req);
-  const templates = getInstructionTemplates(userKey);
-  const next = templates.filter((t) => t.name !== name);
-  if (next.length === templates.length) {
-    return res.status(404).json({ error: 'No se encontró la plantilla.' });
+  try {
+    const templates = await deleteInstructionTemplateForUser(userKey, name);
+    if (!templates) {
+      return res.status(404).json({ error: 'No se encontró la plantilla.' });
+    }
+    res.json({ success: true, templates, userKey });
+  } catch (e) {
+    res.status(500).json({ error: 'No se pudo eliminar la plantilla.' });
   }
-  setInstructionTemplates(next, userKey);
-  saveConfig();
-  res.json({ success: true, templates: [...next].sort((a, b) => a.name.localeCompare(b.name, 'es')), userKey });
 });
 
 app.get('/api/ai-config', (req, res) => {
@@ -1561,11 +1675,19 @@ app.get('/api/download-zip/:courseId/:workId', async (req, res) => {
 //  INICIO
 // ============================================================
 async function ensureDirs() {
+  await fsp.mkdir(DATA_DIR, { recursive: true });
   await fsp.mkdir(path.join(__dirname, 'correcciones'), { recursive: true });
   await fsp.mkdir(path.join(__dirname, 'public'), { recursive: true });
 }
 
 ensureDirs().then(() => {
+  if (templateDb) {
+    initTemplateDb().then((ready) => {
+      if (ready) return backfillTemplatesToDb();
+    }).catch((err) => {
+      console.error('No se pudo preparar PostgreSQL para plantillas:', err.message);
+    });
+  }
   app.listen(PORT, () => {
     console.log('\n╔══════════════════════════════════════════════════╗');
     console.log('║         CORRECTOR IA — Google Classroom          ║');
