@@ -8,7 +8,6 @@ const XLSX = require('xlsx');
 const multer = require('multer');
 const archiver = require('archiver');
 const crypto = require('crypto');
-const { Pool } = require('pg');
 let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (e) {}
 let sharp;
@@ -17,7 +16,6 @@ try { sharp = require('sharp'); } catch (e) { console.warn('sharp no disponible 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || __dirname;
-const DATABASE_URL = process.env.DATABASE_URL || '';
 
 // ============================================================
 //  CONFIGURACIÓN
@@ -106,108 +104,101 @@ function normalizeInstructionTemplate(template) {
     text: String(template?.text || '').trim().slice(0, 20000),
   };
 }
-const templateDb = DATABASE_URL
-  ? new Pool({
-      connectionString: DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-    })
-  : null;
-let templateDbReady = null;
+function normalizeInstructionTemplates(templates) {
+  if (!Array.isArray(templates)) return [];
+  return templates
+    .map(normalizeInstructionTemplate)
+    .filter((tpl) => tpl.name && tpl.text)
+    .slice(0, 50)
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
 
-async function initTemplateDb() {
-  if (!templateDb) return false;
-  if (!templateDbReady) {
-    templateDbReady = (async () => {
-      await templateDb.query(`
-        CREATE TABLE IF NOT EXISTS instruction_templates (
-          id BIGSERIAL PRIMARY KEY,
-          user_key TEXT NOT NULL,
-          name TEXT NOT NULL,
-          text TEXT NOT NULL,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          UNIQUE(user_key, name)
-        )
-      `);
-      await templateDb.query(`
-        CREATE INDEX IF NOT EXISTS instruction_templates_user_key_idx
-        ON instruction_templates (user_key)
-      `);
-      console.log('Plantillas: PostgreSQL listo');
-      return true;
-    })().catch((err) => {
-      console.error('No se pudo inicializar PostgreSQL para plantillas:', err.message);
-      templateDbReady = null;
-      return false;
+const TEMPLATE_DRIVE_FILE_NAME = 'corrector_instruction_templates.json';
+
+async function findInstructionTemplateFileId() {
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+  const result = await drive.files.list({
+    spaces: 'appDataFolder',
+    pageSize: 1,
+    fields: 'files(id, name)',
+    q: `name = '${TEMPLATE_DRIVE_FILE_NAME}' and trashed = false`,
+  });
+  return result.data.files?.[0]?.id || null;
+}
+
+async function readTemplatesFromDrive() {
+  const fileId = await findInstructionTemplateFileId();
+  if (!fileId) return null;
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+  const result = await drive.files.get(
+    { fileId, alt: 'media' },
+    { responseType: 'text' }
+  );
+  const raw = typeof result.data === 'string' ? result.data : JSON.stringify(result.data || {});
+  const parsed = JSON.parse(raw);
+  return normalizeInstructionTemplates(Array.isArray(parsed) ? parsed : parsed.templates);
+}
+
+async function writeTemplatesToDrive(templates) {
+  const normalized = normalizeInstructionTemplates(templates);
+  const fileId = await findInstructionTemplateFileId();
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+  const media = {
+    mimeType: 'application/json',
+    body: JSON.stringify({ templates: normalized }, null, 2),
+  };
+  if (fileId) {
+    await drive.files.update({ fileId, media });
+  } else {
+    await drive.files.create({
+      requestBody: { name: TEMPLATE_DRIVE_FILE_NAME, parents: ['appDataFolder'] },
+      media,
+      fields: 'id',
     });
   }
-  return templateDbReady;
+  return normalized;
 }
 
 async function listInstructionTemplates(userKey) {
-  if (templateDb && await initTemplateDb()) {
-    const result = await templateDb.query(
-      `SELECT name, text FROM instruction_templates WHERE user_key = $1 ORDER BY name ASC`,
-      [userKey]
-    );
-    return result.rows;
+  if (userKey !== 'local' && oauth2Client.credentials?.access_token) {
+    const driveTemplates = await readTemplatesFromDrive();
+    if (driveTemplates) return driveTemplates;
+    const mergedTemplates = getMergedTemplatesForUser(userKey);
+    if (mergedTemplates.length) {
+      return writeTemplatesToDrive(mergedTemplates);
+    }
+    return [];
   }
-  return [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return normalizeInstructionTemplates(getInstructionTemplates(userKey));
 }
 
 async function saveInstructionTemplateForUser(userKey, template) {
-  if (templateDb && await initTemplateDb()) {
-    await templateDb.query(
-      `INSERT INTO instruction_templates (user_key, name, text)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_key, name)
-       DO UPDATE SET text = EXCLUDED.text, updated_at = NOW()`,
-      [userKey, template.name, template.text]
-    );
-    return listInstructionTemplates(userKey);
+  if (userKey !== 'local' && oauth2Client.credentials?.access_token) {
+    const templates = await listInstructionTemplates(userKey);
+    const next = templates.filter((t) => t.name !== template.name);
+    next.push(template);
+    return writeTemplatesToDrive(next);
   }
   const templates = getInstructionTemplates(userKey).filter((t) => t.name !== template.name);
   templates.push(template);
   setInstructionTemplates(templates.slice(-50), userKey);
   saveConfig();
-  return [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  return normalizeInstructionTemplates(getInstructionTemplates(userKey));
 }
 
 async function deleteInstructionTemplateForUser(userKey, name) {
-  if (templateDb && await initTemplateDb()) {
-    const result = await templateDb.query(
-      `DELETE FROM instruction_templates WHERE user_key = $1 AND name = $2`,
-      [userKey, name]
-    );
-    if (result.rowCount === 0) return null;
-    return listInstructionTemplates(userKey);
+  if (userKey !== 'local' && oauth2Client.credentials?.access_token) {
+    const templates = await listInstructionTemplates(userKey);
+    const next = templates.filter((t) => t.name !== name);
+    if (next.length === templates.length) return null;
+    return writeTemplatesToDrive(next);
   }
   const templates = getInstructionTemplates(userKey);
   const next = templates.filter((t) => t.name !== name);
   if (next.length === templates.length) return null;
   setInstructionTemplates(next, userKey);
   saveConfig();
-  return [...next].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-}
-
-async function backfillTemplatesToDb() {
-  if (!templateDb || !(await initTemplateDb())) return;
-  ensureInstructionTemplateStore();
-  const entries = Object.entries(appConfig.instructionTemplatesByUser || {});
-  if (!entries.length) return;
-  for (const [userKey, templates] of entries) {
-    for (const tpl of templates || []) {
-      const normalized = normalizeInstructionTemplate(tpl);
-      if (!normalized.name || !normalized.text) continue;
-      await templateDb.query(
-        `INSERT INTO instruction_templates (user_key, name, text)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (user_key, name)
-         DO UPDATE SET text = EXCLUDED.text, updated_at = NOW()`,
-        [userKey, normalized.name, normalized.text]
-      );
-    }
-  }
+  return normalizeInstructionTemplates(next);
 }
 
 const SCOPES = [
@@ -215,6 +206,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
   'https://www.googleapis.com/auth/classroom.student-submissions.students.readonly',
   'https://www.googleapis.com/auth/classroom.rosters.readonly',
+  'https://www.googleapis.com/auth/drive.appdata',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -465,17 +457,13 @@ app.post('/api/config', express.json(), (req, res) => {
 app.get('/api/instruction-templates', async (req, res) => {
   const userKey = getTemplateUserKey(req);
   try {
-    let templates = await listInstructionTemplates(userKey);
-    if (userKey !== 'local' && !templateDb) {
-      const mergedTemplates = getMergedTemplatesForUser(userKey);
-      if (mergedTemplates.length !== getInstructionTemplates(userKey).length) {
-        setInstructionTemplates(mergedTemplates, userKey);
-        saveConfig();
-      }
-      templates = [...getInstructionTemplates(userKey)].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-    }
+    const templates = await listInstructionTemplates(userKey);
     res.json({ templates, userKey });
   } catch (e) {
+    const code = e.code || e.status;
+    if (code === 401 || code === 403) {
+      return res.status(401).json({ error: 'Debes volver a conectar Google para autorizar el guardado de plantillas en Drive.' });
+    }
     res.status(500).json({ error: 'No se pudieron cargar las plantillas.' });
   }
 });
@@ -491,6 +479,10 @@ app.post('/api/instruction-templates', express.json({ limit: '256kb' }), async (
     const templates = await saveInstructionTemplateForUser(userKey, normalized);
     res.json({ success: true, templates, userKey });
   } catch (e) {
+    const code = e.code || e.status;
+    if (code === 401 || code === 403) {
+      return res.status(401).json({ error: 'Debes volver a conectar Google para autorizar el guardado de plantillas en Drive.' });
+    }
     res.status(500).json({ error: 'No se pudo guardar la plantilla.' });
   }
 });
@@ -506,6 +498,10 @@ app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), a
     }
     res.json({ success: true, templates, userKey });
   } catch (e) {
+    const code = e.code || e.status;
+    if (code === 401 || code === 403) {
+      return res.status(401).json({ error: 'Debes volver a conectar Google para autorizar el guardado de plantillas en Drive.' });
+    }
     res.status(500).json({ error: 'No se pudo eliminar la plantilla.' });
   }
 });
@@ -1681,13 +1677,6 @@ async function ensureDirs() {
 }
 
 ensureDirs().then(() => {
-  if (templateDb) {
-    initTemplateDb().then((ready) => {
-      if (ready) return backfillTemplatesToDb();
-    }).catch((err) => {
-      console.error('No se pudo preparar PostgreSQL para plantillas:', err.message);
-    });
-  }
   app.listen(PORT, () => {
     console.log('\n╔══════════════════════════════════════════════════╗');
     console.log('║         CORRECTOR IA — Google Classroom          ║');

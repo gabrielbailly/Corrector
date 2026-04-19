@@ -21,13 +21,5 @@ services:
         sync: false          # contenido completo del client_secret_*.json
       - key: GOOGLE_TOKEN
         sync: false          # se rellena después del primer login
-      - key: DATABASE_URL
-        fromDatabase:
-          name: corrector-db
-          property: connectionString
       - key: DATA_DIR
         value: /var/data
-
-databases:
-  - name: corrector-db
-    plan: free
