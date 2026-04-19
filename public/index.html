@@ -89,6 +89,7 @@ textarea{resize:vertical;min-height:90px}
 .tab-btn.active{background:var(--blue-light);border-color:#93c5fd;color:var(--blue)}
 .tab-panel{display:none}
 .tab-panel.active{display:block}
+.tab-row.hidden-tabs{display:none}
 .section-box{background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem}
 .template-editor{display:flex;flex-direction:column;gap:.75rem}
 .template-actions{display:flex;gap:.75rem;flex-wrap:wrap}
@@ -395,7 +396,7 @@ textarea{resize:vertical;min-height:90px}
     </div>
 
     <div id="step2-content">
-      <div class="tab-row">
+      <div class="tab-row" id="step2-tabs">
         <button class="tab-btn active" id="step2-tab-classroom" onclick="switchTab('step2', 'classroom')">Google Classroom</button>
         <button class="tab-btn" id="step2-tab-local" onclick="switchTab('step2', 'local')">Subir desde ordenador</button>
       </div>
@@ -808,6 +809,7 @@ function handleUrlParams() {
 function continueWithoutGoogle() {
   state.user = { authenticated: false, localMode: true };
   loadInstructionTemplates();
+  updateStep2Mode();
   markStepDone(1);
   goToStep2();
 }
@@ -818,9 +820,26 @@ async function checkAuth() {
     const data = await r.json();
     state.user = data;
     updateAuthUI(data);
+    updateStep2Mode();
     await loadInstructionTemplates();
   } catch (e) {
     console.error('Auth check failed', e);
+  }
+}
+
+function updateStep2Mode() {
+  const tabs = document.getElementById('step2-tabs');
+  const classroomPanel = document.getElementById('step2-panel-classroom');
+  const localPanel = document.getElementById('step2-panel-local');
+  const localOnly = !state.user?.authenticated;
+  if (!tabs || !classroomPanel || !localPanel) return;
+
+  tabs.classList.toggle('hidden-tabs', localOnly);
+  classroomPanel.classList.toggle('hidden', localOnly);
+  if (localOnly) {
+    localPanel.classList.add('active');
+    document.getElementById('step2-tab-local')?.classList.add('active');
+    document.getElementById('step2-tab-classroom')?.classList.remove('active');
   }
 }
 
