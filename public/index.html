@@ -1265,6 +1265,33 @@ async function fileToBase64Data(file) {
   });
 }
 
+function escapeRegexClient(str) {
+  return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function redactSensitiveTextClient(text, context = {}) {
+  let value = String(text || '');
+  if (!value.trim()) return '';
+
+  value = value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[EMAIL]')
+    .replace(/(?:\+34\s*)?(?:\d[\s.-]?){9,}/g, '[TELEFONO]')
+    .replace(/\b\d{8}[A-Z]\b/gi, '[DNI]')
+    .replace(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/g, '[FECHA]')
+    .replace(/\b(nombre|alumno|alumna|estudiante|correo|email|e-mail|tel[eé]fono|dni|nif)\s*:\s*.+$/gim, '$1: [DATO OCULTO]');
+
+  if (context.studentEmail) {
+    value = value.replace(new RegExp(escapeRegexClient(context.studentEmail), 'gi'), '[EMAIL]');
+  }
+  if (context.studentName) {
+    const parts = String(context.studentName).split(/\s+/).filter((part) => part.length >= 3);
+    for (const part of parts) {
+      value = value.replace(new RegExp(`\\b${escapeRegexClient(part)}\\b`, 'gi'), '[NOMBRE]');
+    }
+  }
+  return value;
+}
+
 /** Build Gemini `parts` array from prompt + files */
 function buildGeminiParts(prompt, files) {
   const parts = [{ text: prompt }];
@@ -1272,11 +1299,11 @@ function buildGeminiParts(prompt, files) {
     if (f.mimeType.startsWith('image/')) {
       parts.push({ inline_data: { mime_type: f.mimeType, data: f.dataBase64 } });
     } else if (f.mimeType === 'application/pdf' && f.extractedText) {
-      parts.push({ text: `\n--- ${f.name} (texto extraido del PDF) ---\n${f.extractedText}` });
+      parts.push({ text: `\n--- ${f.name} (texto extraido del PDF) ---\n${redactSensitiveTextClient(f.extractedText, f.redactionContext)}` });
     } else if (f.mimeType === 'application/pdf') {
       parts.push({ inline_data: { mime_type: 'application/pdf', data: f.dataBase64 } });
     } else if (f.mimeType === 'text/plain') {
-      try { parts.push({ text: `\n--- ${f.name} ---\n${atob(f.dataBase64)}` }); } catch (e) {}
+      try { parts.push({ text: `\n--- ${f.name} ---\n${redactSensitiveTextClient(atob(f.dataBase64), f.redactionContext)}` }); } catch (e) {}
     }
   }
   return parts;
@@ -1289,9 +1316,9 @@ function buildGroqContent(prompt, files) {
     if (f.mimeType.startsWith('image/')) {
       content.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.dataBase64}` } });
     } else if (f.mimeType === 'text/plain') {
-      try { content.push({ type: 'text', text: `\n--- ${f.name} ---\n${atob(f.dataBase64)}` }); } catch (e) {}
+      try { content.push({ type: 'text', text: `\n--- ${f.name} ---\n${redactSensitiveTextClient(atob(f.dataBase64), f.redactionContext)}` }); } catch (e) {}
     } else if (f.mimeType === 'application/pdf' && f.extractedText) {
-      content.push({ type: 'text', text: `\n--- ${f.name} (texto extraído) ---\n${f.extractedText}` });
+      content.push({ type: 'text', text: `\n--- ${f.name} (texto extraído) ---\n${redactSensitiveTextClient(f.extractedText, f.redactionContext)}` });
     }
   }
   return content;
@@ -1530,6 +1557,7 @@ async function startCorrection() {
           name: anonymizeLocalFilename(f.name, fileIndex),
           mimeType: f.type || 'application/octet-stream',
           dataBase64: await fileToBase64Data(f),
+          redactionContext: { studentName, studentEmail },
         })));
       } else {
         // 1. Download student files from server (Drive → base64)
@@ -1545,7 +1573,10 @@ async function startCorrection() {
         const loaded = await filesRes.json();
         studentName = loaded.studentName;
         studentEmail = loaded.studentEmail || '';
-        studentFiles = loaded.files || [];
+        studentFiles = (loaded.files || []).map((file) => ({
+          ...file,
+          redactionContext: { studentName, studentEmail },
+        }));
       }
 
       if (!studentFiles.length) throw new Error('No se pudieron descargar los archivos de la entrega');

@@ -104,6 +104,31 @@ function normalizeInstructionTemplate(template) {
     text: String(template?.text || '').trim().slice(0, 20000),
   };
 }
+function escapeRegex(str) {
+  return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function redactSensitiveText(text, context = {}) {
+  let value = String(text || '');
+  if (!value.trim()) return '';
+
+  value = value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[EMAIL]')
+    .replace(/(?:\+34\s*)?(?:\d[\s.-]?){9,}/g, '[TELEFONO]')
+    .replace(/\b\d{8}[A-Z]\b/gi, '[DNI]')
+    .replace(/\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b/g, '[FECHA]')
+    .replace(/\b(nombre|alumno|alumna|estudiante|correo|email|e-mail|tel[eé]fono|dni|nif)\s*:\s*.+$/gim, '$1: [DATO OCULTO]');
+
+  if (context.studentEmail) {
+    value = value.replace(new RegExp(escapeRegex(context.studentEmail), 'gi'), '[EMAIL]');
+  }
+  if (context.studentName) {
+    const parts = String(context.studentName).split(/\s+/).filter((part) => part.length >= 3);
+    for (const part of parts) {
+      value = value.replace(new RegExp(`\\b${escapeRegex(part)}\\b`, 'gi'), '[NOMBRE]');
+    }
+  }
+  return value;
+}
 function normalizeInstructionTemplates(templates) {
   if (!Array.isArray(templates)) return [];
   return templates
@@ -832,7 +857,7 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
       });
     } else if (file.mimeType === 'application/pdf') {
       // Intentar extraer texto del PDF
-      const pdfText = await extractPdfText(file.buffer);
+      const pdfText = redactSensitiveText(await extractPdfText(file.buffer));
       if (pdfText && pdfText.length > 50) {
         content.push({
           type: 'text',
@@ -847,7 +872,7 @@ async function callGroq(prompt, files, attempt = 1, onRetry = null) {
         });
       }
     } else if (file.mimeType === 'text/plain') {
-      content.push({ type: 'text', text: `\n--- ${file.name} ---\n${file.buffer.toString('utf8')}` });
+      content.push({ type: 'text', text: `\n--- ${file.name} ---\n${redactSensitiveText(file.buffer.toString('utf8'))}` });
     }
   }
 
@@ -934,7 +959,7 @@ async function callGemini(prompt, files, attempt = 1, onRetry = null) {
       // Gemini soporta PDF nativo — no hace falta extraer texto
       parts.push({ inline_data: { mime_type: 'application/pdf', data: file.buffer.toString('base64') } });
     } else if (file.mimeType === 'text/plain') {
-      parts.push({ text: `\n--- ${file.name} ---\n${file.buffer.toString('utf8')}` });
+      parts.push({ text: `\n--- ${file.name} ---\n${redactSensitiveText(file.buffer.toString('utf8'))}` });
     }
   }
 
@@ -1538,8 +1563,10 @@ app.post('/api/student-files', express.json({ limit: '2mb' }), async (req, res) 
 
       // For PDFs: also extract text (Groq doesn't support PDFs natively)
       if (mime === 'application/pdf') {
-        const text = await extractPdfText(buf);
+        const text = redactSensitiveText(await extractPdfText(buf), { studentName, studentEmail });
         if (text) entry.extractedText = text;
+      } else if (mime === 'text/plain') {
+        entry.extractedText = redactSensitiveText(buf.toString('utf8'), { studentName, studentEmail });
       }
 
       files.push(entry);
