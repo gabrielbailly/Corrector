@@ -483,6 +483,7 @@ textarea{resize:vertical;min-height:90px}
             <span class="tag" id="task-count-tag">0 alumnos</span>
             <span class="tag" id="task-submitted-tag">0 entregas</span>
           </div>
+          <p id="task-privacy-note" class="text-muted mt-1 hidden"></p>
         </div>
 
         <div class="students-header">
@@ -1672,6 +1673,14 @@ function renderTaskInfo(data) {
 
   document.getElementById('task-title').textContent = data.task;
   document.getElementById('task-course').textContent = `📚 ${data.course}`;
+  const privacyNote = document.getElementById('task-privacy-note');
+  if (privacyNote) {
+    const isClassroom = !!data.courseId && data.source !== 'local';
+    privacyNote.textContent = isClassroom
+      ? 'Privacidad: antes de enviar las entregas de Classroom a la IA, el sistema anonimiza nombres de archivo, nombre del alumno, email y otros datos detectables en el texto extraído.'
+      : '';
+    privacyNote.classList.toggle('hidden', !isClassroom);
+  }
 
   const total = data.submissions.length;
   const submitted = data.submissions.filter(s => s.hasSubmission).length;
@@ -1811,12 +1820,14 @@ function updateStep3Summary() {
   const selected = getSelectedSubmissions();
   const box = document.getElementById('step3-summary');
   const instructions = document.getElementById('instructions')?.value.trim();
+  const isClassroom = !!state.task?.courseId && state.task?.source !== 'local';
   box.innerHTML = `
     <strong>📝 Resumen:</strong> Se corregirán <strong>${selected.length} entregas</strong>
     de la tarea <em>"${esc(state.task?.task || '')}"</em>
     (${esc(state.task?.course || '')}).
     ${state.refFiles.length > 0 ? `<br>📎 ${state.refFiles.length} archivo(s) de referencia adjunto(s).` : ''}
     ${instructions ? `<br>🧭 Se aplicarán instrucciones personalizadas para esta corrección.` : ''}
+    ${isClassroom ? `<br>🔒 En Classroom, los nombres y datos del alumnado se envían anonimizados a la IA.` : ''}
     <br><span style="font-size:.8rem;color:#1e40af;margin-top:.25rem;display:block">
       ⏱ Estimado: ~${Math.ceil(selected.length * 0.5)} – ${Math.ceil(selected.length * 1)} minuto(s)
     </span>
