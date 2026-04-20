@@ -120,6 +120,28 @@ textarea{resize:vertical;min-height:90px}
 .file-size{color:var(--text-muted);font-size:.75rem}
 .file-remove{cursor:pointer;color:var(--text-muted);padding:.2rem;border-radius:.25rem;transition:color .2s}
 .file-remove:hover{color:var(--red)}
+.file-actions{display:flex;align-items:center;gap:.35rem;flex-shrink:0}
+.file-mini-btn{border:1px solid var(--border);background:#fff;color:var(--text-muted);font-size:.72rem;padding:.25rem .5rem;border-radius:.4rem;cursor:pointer}
+.file-mini-btn:hover{border-color:#93c5fd;color:var(--blue);background:var(--blue-light)}
+.file-badge{font-size:.68rem;padding:.14rem .45rem;border-radius:999px;background:#dcfce7;color:#166534;font-weight:700}
+
+.modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.62);display:flex;align-items:center;justify-content:center;padding:1rem;z-index:300}
+.modal-card{background:#fff;border-radius:var(--radius);width:min(980px,100%);max-height:92vh;overflow:auto;box-shadow:0 24px 60px rgba(0,0,0,.24);padding:1rem}
+.modal-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+.modal-title{font-size:1rem;font-weight:800}
+.modal-subtitle{font-size:.82rem;color:var(--text-muted);margin-top:.15rem}
+.modal-close{border:none;background:transparent;font-size:1.2rem;cursor:pointer;color:var(--text-muted)}
+.anonymizer-layout{display:grid;grid-template-columns:1.5fr .9fr;gap:1rem}
+.anonymizer-canvas-wrap{background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.75rem;overflow:auto}
+.anonymizer-canvas{display:block;max-width:100%;cursor:crosshair;border-radius:.35rem}
+.anonymizer-side{display:flex;flex-direction:column;gap:.75rem}
+.anonymizer-box{background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.75rem}
+.anonymizer-progress{width:100%;height:8px;background:#dbeafe;border-radius:999px;overflow:hidden;margin-top:.5rem}
+.anonymizer-progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--blue),#6366f1);transition:width .2s}
+.anonymizer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin-top:.75rem}
+.anonymizer-actions .btn{min-width:0;white-space:normal;text-align:center;line-height:1.25;padding:.75rem .85rem}
+@media(max-width:820px){.anonymizer-layout{grid-template-columns:1fr}}
+@media(max-width:520px){.anonymizer-actions{grid-template-columns:1fr}}
 
 /* ========== TASK INFO ========== */
 .task-info-box{background:var(--blue-light);border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:1rem 1.25rem;margin-bottom:1.25rem}
@@ -432,17 +454,19 @@ textarea{resize:vertical;min-height:90px}
         <div class="section-box">
           <label>Subir entregas desde tu ordenador</label>
           <div class="input-row">
-            <input type="text" id="local-course-name" placeholder="Nombre del curso" />
-            <input type="text" id="local-task-name" placeholder="Nombre de la tarea o examen" />
+            <input type="text" id="local-course-name" placeholder="Nombre del curso (opcional)" />
+            <input type="text" id="local-task-name" placeholder="Nombre de la tarea o examen (opcional)" />
           </div>
-          <div class="dropzone mt-1" onclick="document.getElementById('local-submissions-input').click()">
+          <div class="dropzone mt-1" id="local-dropzone" onclick="document.getElementById('local-submissions-input').click()"
+               ondragover="handleLocalDragOver(event)" ondragleave="handleLocalDragLeave(event)" ondrop="handleLocalDrop(event)">
             <input type="file" id="local-submissions-input" multiple accept="image/*,.pdf,.doc,.docx,.txt" onchange="handleLocalSubmissions(event)">
             <div class="dropzone-icon">🗂️</div>
-            <p><strong>Haz clic para subir las entregas</strong></p>
+            <p><strong>Haz clic para subir las entregas</strong> o arrástralas aquí</p>
             <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">Cada archivo se tratará como la entrega de un alumno. El nombre del archivo se usará como nombre del alumno.</p>
           </div>
           <div class="file-list" id="local-submissions-list"></div>
           <div class="mt-2">
+            <button class="btn btn-secondary" onclick="anonymizeAllLocalImages()">Anonimizar entregas compatibles</button>
             <button class="btn btn-primary" onclick="loadLocalTask()">Cargar entregas locales</button>
           </div>
         </div>
@@ -591,6 +615,61 @@ textarea{resize:vertical;min-height:90px}
 
 </main>
 
+<div id="anonymizer-modal" class="modal-backdrop hidden">
+  <div class="modal-card">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Anonimizar documento antes de corregir</div>
+        <div class="modal-subtitle">La detección automática busca zonas típicas con nombre, alumno, DNI o correo. Puedes ajustar manualmente los rectángulos.</div>
+      </div>
+      <button class="modal-close" onclick="closeAnonymizer()">✕</button>
+    </div>
+
+    <div class="anonymizer-layout">
+      <div class="anonymizer-canvas-wrap">
+        <canvas id="anonymizer-canvas" class="anonymizer-canvas"></canvas>
+      </div>
+
+      <div class="anonymizer-side">
+        <div class="anonymizer-box">
+          <strong id="anonymizer-doc-label">Documento</strong>
+          <div id="anonymizer-page-nav" class="anonymizer-actions" style="margin-top:.5rem">
+            <button class="btn btn-secondary" onclick="openPreviousAnonymizerPage()">← Página anterior</button>
+            <button class="btn btn-secondary" onclick="openNextAnonymizerPage()">Página siguiente →</button>
+          </div>
+          <div id="anonymizer-page-info" class="text-muted mt-1">Página 1 de 1</div>
+        </div>
+
+        <div class="anonymizer-box">
+          <strong>Estado</strong>
+          <div id="anonymizer-status" class="text-muted mt-1">Carga una imagen local y pulsa detectar.</div>
+          <div class="anonymizer-progress"><div id="anonymizer-progress-bar" class="anonymizer-progress-bar"></div></div>
+        </div>
+
+        <div class="anonymizer-box">
+          <strong>Instrucciones</strong>
+          <p class="text-muted mt-1">1. Pulsa <strong>Detectar</strong> para buscar zonas sensibles.</p>
+          <p class="text-muted">2. Arrastra sobre la imagen para añadir o corregir tachones.</p>
+          <p class="text-muted">3. Guarda la versión anonimizada para usarla en la corrección.</p>
+        </div>
+
+        <div class="anonymizer-box">
+          <strong>Acciones</strong>
+          <div class="anonymizer-actions">
+            <button class="btn btn-secondary" onclick="openPreviousAnonymizer()">← Anterior</button>
+            <button class="btn btn-secondary" onclick="openNextAnonymizer()">Siguiente →</button>
+            <button class="btn btn-primary" id="btn-anonymizer-detect" onclick="runImageAutoDetection()">Detectar automáticamente</button>
+            <button class="btn btn-secondary" onclick="clearAnonymizerRects()">Limpiar tachones</button>
+            <button class="btn btn-green" onclick="saveAnonymizedImage()">Usar imagen anonimizada</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 // ================================================================
 //  STATE
@@ -606,6 +685,19 @@ let state = {
   instructionTemplates: [],
   correctionOutput: null,
   correctionStartedAt: null,
+};
+let anonymizerState = {
+  entryIndex: null,
+  image: null,
+  pdfDoc: null,
+  pageCount: 1,
+  currentPage: 1,
+  pageRects: { 1: [] },
+  scale: 1,
+  drawing: false,
+  startX: 0,
+  startY: 0,
+  sourceType: 'image',
 };
 
 // ================================================================
@@ -1010,7 +1102,29 @@ async function loadTask() {
 }
 
 function handleLocalSubmissions(e) {
-  state.localSubmissionFiles = Array.from(e.target.files || []);
+  state.localSubmissionFiles = Array.from(e.target.files || []).map((file) => ({
+    originalFile: file,
+    anonymizedFiles: [],
+  }));
+  renderLocalSubmissionsList();
+}
+
+function handleLocalDragOver(e) {
+  e.preventDefault();
+  document.getElementById('local-dropzone').classList.add('drag-over');
+}
+
+function handleLocalDragLeave() {
+  document.getElementById('local-dropzone').classList.remove('drag-over');
+}
+
+function handleLocalDrop(e) {
+  e.preventDefault();
+  document.getElementById('local-dropzone').classList.remove('drag-over');
+  state.localSubmissionFiles = Array.from(e.dataTransfer.files || []).map((file) => ({
+    originalFile: file,
+    anonymizedFiles: [],
+  }));
   renderLocalSubmissionsList();
 }
 
@@ -1018,16 +1132,22 @@ function renderLocalSubmissionsList() {
   const list = document.getElementById('local-submissions-list');
   if (!list) return;
   list.innerHTML = '';
-  state.localSubmissionFiles.forEach((file, i) => {
+  state.localSubmissionFiles.forEach((entry, i) => {
+    const file = getLocalSubmissionFiles(entry)[0];
     const item = document.createElement('div');
-    const studentName = inferStudentNameFromFilename(file.name);
+    const studentName = inferStudentNameFromFilename(entry.originalFile.name);
     const size = file.size > 1e6 ? (file.size / 1e6).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB';
+    const isCompatible = isImageSubmission(entry) || isPdfSubmission(entry);
     item.className = 'file-item';
     item.innerHTML = `
       <span class="file-icon">🧑‍🎓</span>
       <span class="file-name">${esc(studentName)}</span>
-      <span class="file-size">${esc(file.name)} · ${size}</span>
-      <span class="file-remove" onclick="removeLocalSubmission(${i})" title="Quitar">✕</span>
+      <span class="file-size">${esc(file.name)} · ${size}${entry.anonymizedFiles?.length > 1 ? ` · ${entry.anonymizedFiles.length} pág.` : ''}</span>
+      <span class="file-actions">
+        ${entry.anonymizedFiles?.length ? '<span class="file-badge">Anonimizada</span>' : ''}
+        ${isCompatible ? `<button class="file-mini-btn" onclick="openAnonymizer(${i})">Anonimizar</button>` : ''}
+        <span class="file-remove" onclick="removeLocalSubmission(${i})" title="Quitar">✕</span>
+      </span>
     `;
     list.appendChild(item);
   });
@@ -1042,28 +1162,480 @@ function inferStudentNameFromFilename(filename) {
   return filename.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim() || 'Alumno';
 }
 
+function isImageSubmission(entry) {
+  const file = entry?.originalFile || entry;
+  return !!file && String(file.type || '').startsWith('image/');
+}
+
+function isPdfSubmission(entry) {
+  const file = entry?.originalFile || entry;
+  return !!file && String(file.type || '') === 'application/pdf';
+}
+
+function getCompatibleSubmissionIndexes() {
+  return state.localSubmissionFiles
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => isImageSubmission(entry) || isPdfSubmission(entry))
+    .map(({ index }) => index);
+}
+
+function getLocalSubmissionFile(entry) {
+  return getLocalSubmissionFiles(entry)[0];
+}
+
+function getLocalSubmissionFiles(entry) {
+  return entry.anonymizedFiles?.length ? entry.anonymizedFiles : [entry.originalFile];
+}
+
 function anonymizeLocalFilename(filename, index) {
   const dot = filename.lastIndexOf('.');
   const ext = dot > 0 ? filename.slice(dot).replace(/[^.a-zA-Z0-9]/g, '') : '';
   return `entrega_${index + 1}${ext}`;
 }
 
-function loadLocalTask() {
-  const courseName = document.getElementById('local-course-name').value.trim();
-  const taskName = document.getElementById('local-task-name').value.trim();
-  if (!courseName || !taskName) return alert('Indica el curso y el nombre de la tarea o examen.');
+function cleanDetectedLabel(value) {
+  return String(value || '')
+    .replace(/^[:\-\s]+/, '')
+    .replace(/[|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
+function shortenDetectedTaskName(value) {
+  const cleaned = cleanDetectedLabel(value)
+    .replace(/^(de|del|sobre|tema|unidad|actividad|tarea|examen|prueba)\s+/i, '')
+    .replace(/[.:;,-]+$/g, '')
+    .trim();
+  const words = cleaned.split(/\s+/).filter(Boolean).slice(0, 6);
+  return words.join(' ').slice(0, 48).trim();
+}
+
+function detectLabelFromText(text, labels) {
+  const lines = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 20);
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    for (const label of labels) {
+      const idx = lower.indexOf(label);
+      if (idx >= 0) {
+        const remainder = cleanDetectedLabel(line.slice(idx + label.length));
+        if (remainder.length >= 3) return remainder;
+      }
+    }
+  }
+  return '';
+}
+
+async function extractLocalTextSnippet(file) {
+  if (!file) return '';
+  if (String(file.type || '').startsWith('text/')) {
+    return (await file.text()).slice(0, 4000);
+  }
+  if (String(file.type || '').startsWith('image/') && window.Tesseract) {
+    try {
+      const { data } = await Tesseract.recognize(file, 'spa+eng');
+      return String(data?.text || '').slice(0, 2500);
+    } catch (e) {
+      return '';
+    }
+  }
+  return '';
+}
+
+async function inferLocalContextFromFiles(entries) {
+  const samples = entries.slice(0, 3).map((entry) => getLocalSubmissionFile(entry));
+  let combined = '';
+  for (const file of samples) {
+    combined += `\n${await extractLocalTextSnippet(file)}`;
+  }
+
+  const detectedCourse = detectLabelFromText(combined, ['curso', 'asignatura', 'materia', 'subject', 'class']) || '';
+  const detectedTaskRaw = detectLabelFromText(combined, ['tarea', 'actividad', 'examen', 'prueba', 'tema', 'worksheet', 'unit']) || '';
+  const detectedTask = shortenDetectedTaskName(detectedTaskRaw);
+
+  return {
+    courseName: detectedCourse || 'Curso local',
+    taskName: detectedTask || 'Tarea local',
+  };
+}
+
+function setAnonymizerStatus(text, pct = 0) {
+  const status = document.getElementById('anonymizer-status');
+  const bar = document.getElementById('anonymizer-progress-bar');
+  if (status) status.textContent = text;
+  if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function getAnonymizerCanvas() {
+  return document.getElementById('anonymizer-canvas');
+}
+
+function getAnonymizerContext() {
+  const canvas = getAnonymizerCanvas();
+  return canvas ? canvas.getContext('2d') : null;
+}
+
+function getCurrentAnonymizerRects() {
+  const page = anonymizerState.currentPage || 1;
+  if (!anonymizerState.pageRects[page]) anonymizerState.pageRects[page] = [];
+  return anonymizerState.pageRects[page];
+}
+
+function setCurrentAnonymizerRects(rects) {
+  anonymizerState.pageRects[anonymizerState.currentPage || 1] = rects;
+}
+
+function updateAnonymizerPageInfo() {
+  const info = document.getElementById('anonymizer-page-info');
+  const nav = document.getElementById('anonymizer-page-nav');
+  const label = document.getElementById('anonymizer-doc-label');
+  if (label) label.textContent = anonymizerState.sourceType === 'pdf' ? 'PDF' : 'Imagen';
+  if (info) info.textContent = `Página ${anonymizerState.currentPage} de ${anonymizerState.pageCount}`;
+  if (nav) nav.classList.toggle('hidden', anonymizerState.pageCount <= 1);
+}
+
+function drawAnonymizerCanvas(previewRect = null) {
+  const canvas = getAnonymizerCanvas();
+  const ctx = getAnonymizerContext();
+  if (!canvas || !ctx || !anonymizerState.image) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(anonymizerState.image, 0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000';
+  for (const rect of getCurrentAnonymizerRects()) {
+    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  }
+  if (previewRect) {
+    ctx.fillStyle = 'rgba(0,0,0,.55)';
+    ctx.fillRect(previewRect.x, previewRect.y, previewRect.w, previewRect.h);
+  }
+}
+
+function getCanvasPointer(evt) {
+  const canvas = getAnonymizerCanvas();
+  const rect = canvas.getBoundingClientRect();
+  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+}
+
+function installAnonymizerCanvasEvents() {
+  const canvas = getAnonymizerCanvas();
+  if (!canvas || canvas.dataset.ready === '1') return;
+
+  canvas.addEventListener('mousedown', (evt) => {
+    if (!anonymizerState.image) return;
+    anonymizerState.drawing = true;
+    const pos = getCanvasPointer(evt);
+    anonymizerState.startX = pos.x;
+    anonymizerState.startY = pos.y;
+  });
+
+  canvas.addEventListener('mousemove', (evt) => {
+    if (!anonymizerState.drawing) return;
+    const pos = getCanvasPointer(evt);
+    drawAnonymizerCanvas({
+      x: Math.min(anonymizerState.startX, pos.x),
+      y: Math.min(anonymizerState.startY, pos.y),
+      w: Math.abs(pos.x - anonymizerState.startX),
+      h: Math.abs(pos.y - anonymizerState.startY),
+    });
+  });
+
+  const finishDraw = (evt) => {
+    if (!anonymizerState.drawing) return;
+    anonymizerState.drawing = false;
+    const pos = getCanvasPointer(evt);
+    getCurrentAnonymizerRects().push({
+      x: Math.min(anonymizerState.startX, pos.x),
+      y: Math.min(anonymizerState.startY, pos.y),
+      w: Math.abs(pos.x - anonymizerState.startX),
+      h: Math.abs(pos.y - anonymizerState.startY),
+    });
+    drawAnonymizerCanvas();
+  };
+
+  canvas.addEventListener('mouseup', finishDraw);
+  canvas.addEventListener('mouseleave', (evt) => { if (anonymizerState.drawing) finishDraw(evt); });
+  canvas.dataset.ready = '1';
+}
+
+async function openAnonymizer(index) {
+  const entry = state.localSubmissionFiles[index];
+  if (!entry || !(isImageSubmission(entry) || isPdfSubmission(entry))) return;
+  if (isPdfSubmission(entry)) {
+    await openPdfAnonymizer(index);
+  } else {
+    await openImageAnonymizer(index);
+  }
+}
+
+async function openImageAnonymizer(index) {
+  const entry = state.localSubmissionFiles[index];
+  const file = getLocalSubmissionFile(entry);
+  const modal = document.getElementById('anonymizer-modal');
+  const canvas = getAnonymizerCanvas();
+  const image = new Image();
+  const src = URL.createObjectURL(file);
+
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = reject;
+    image.src = src;
+  }).finally(() => URL.revokeObjectURL(src));
+
+  const wrapWidth = Math.min(window.innerWidth - 120, 680);
+  anonymizerState = {
+    entryIndex: index,
+    image,
+    pdfDoc: null,
+    pageCount: 1,
+    currentPage: 1,
+    pageRects: { 1: [] },
+    scale: Math.min(1, wrapWidth / image.width),
+    drawing: false,
+    startX: 0,
+    startY: 0,
+    sourceType: 'image',
+  };
+
+  canvas.width = Math.round(image.width * anonymizerState.scale);
+  canvas.height = Math.round(image.height * anonymizerState.scale);
+  installAnonymizerCanvasEvents();
+  updateAnonymizerPageInfo();
+  drawAnonymizerCanvas();
+  setAnonymizerStatus('Imagen lista. Puedes detectar automáticamente o dibujar tachones manualmente.', 0);
+  modal.classList.remove('hidden');
+}
+
+async function openPdfAnonymizer(index) {
+  const entry = state.localSubmissionFiles[index];
+  const file = entry.originalFile;
+  const pdfjs = window.pdfjsLib;
+  if (!pdfjs) {
+    return alert('No se pudo cargar el visor PDF.');
+  }
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  const bytes = await file.arrayBuffer();
+  const pdfDoc = await pdfjs.getDocument({ data: bytes }).promise;
+  anonymizerState = {
+    entryIndex: index,
+    image: null,
+    pdfDoc,
+    pageCount: pdfDoc.numPages,
+    currentPage: 1,
+    pageRects: Object.fromEntries(Array.from({ length: pdfDoc.numPages }, (_, i) => [i + 1, []])),
+    scale: 1,
+    drawing: false,
+    startX: 0,
+    startY: 0,
+    sourceType: 'pdf',
+  };
+  document.getElementById('anonymizer-modal').classList.remove('hidden');
+  await renderCurrentPdfPage();
+  installAnonymizerCanvasEvents();
+  updateAnonymizerPageInfo();
+  setAnonymizerStatus('PDF cargado. Puedes anonimizar página por página.', 0);
+}
+
+async function renderCurrentPdfPage() {
+  if (!anonymizerState.pdfDoc) return;
+  const page = await anonymizerState.pdfDoc.getPage(anonymizerState.currentPage);
+  const viewport = page.getViewport({ scale: 1.4 });
+  const canvas = getAnonymizerCanvas();
+  const ctx = getAnonymizerContext();
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const image = new Image();
+  image.src = canvas.toDataURL('image/png');
+  await new Promise((resolve) => { image.onload = resolve; });
+  anonymizerState.image = image;
+  anonymizerState.scale = 1;
+  drawAnonymizerCanvas();
+  updateAnonymizerPageInfo();
+}
+
+async function openPreviousAnonymizer() {
+  const indexes = getCompatibleSubmissionIndexes();
+  const pos = indexes.indexOf(anonymizerState.entryIndex);
+  if (pos > 0) await openAnonymizer(indexes[pos - 1]);
+}
+
+async function openNextAnonymizer() {
+  const indexes = getCompatibleSubmissionIndexes();
+  const pos = indexes.indexOf(anonymizerState.entryIndex);
+  if (pos >= 0 && pos < indexes.length - 1) await openAnonymizer(indexes[pos + 1]);
+}
+
+async function openPreviousAnonymizerPage() {
+  if (anonymizerState.currentPage > 1) {
+    anonymizerState.currentPage--;
+    await renderCurrentPdfPage();
+  }
+}
+
+async function openNextAnonymizerPage() {
+  if (anonymizerState.currentPage < anonymizerState.pageCount) {
+    anonymizerState.currentPage++;
+    await renderCurrentPdfPage();
+  }
+}
+
+function closeAnonymizer() {
+  document.getElementById('anonymizer-modal').classList.add('hidden');
+}
+
+function clearAnonymizerRects() {
+  setCurrentAnonymizerRects([]);
+  drawAnonymizerCanvas();
+  setAnonymizerStatus('Tachones eliminados. Puedes volver a detectar o dibujar manualmente.', 0);
+}
+
+async function runImageAutoDetection() {
+  if (!window.Tesseract || !anonymizerState.image) {
+    setAnonymizerStatus('No se pudo cargar el OCR automático. Usa el modo manual.', 0);
+    return;
+  }
+  const button = document.getElementById('btn-anonymizer-detect');
+  button.disabled = true;
+  try {
+    const rects = await detectSensitiveRectsInCurrentCanvas();
+    setCurrentAnonymizerRects(rects);
+    drawAnonymizerCanvas();
+    setAnonymizerStatus(rects.length ? `Detección completa. Se han marcado ${rects.length} zona(s). Revísalas antes de guardar.` : 'No se detectaron zonas claras. Puedes dibujar los tachones manualmente.', 100);
+  } catch (e) {
+    console.error('Error OCR automático:', e);
+    const msg = e?.message ? `Error en OCR automático: ${e.message}` : 'Error en OCR automático. Puedes usar el modo manual.';
+    setAnonymizerStatus(msg, 0);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function detectSensitiveRectsInCurrentCanvas() {
+  setAnonymizerStatus('Iniciando OCR…', 8);
+  const KEYWORDS = ['nombre', 'alumno', 'alumna', 'estudiante', 'apellido', 'apellidos', 'dni', 'nie', 'nif', 'correo', 'email'];
+  const LINE_LABELS = ['nombre', 'alumno', 'alumna', 'estudiante', 'apellido', 'apellidos'];
+  const source = getAnonymizerCanvas().toDataURL('image/png');
+  const logger = (m) => {
+    if (m.status === 'recognizing text') {
+      setAnonymizerStatus(`Analizando texto… ${Math.round(m.progress * 100)}%`, 10 + Math.round(m.progress * 85));
+    }
+  };
+  let data;
+  try {
+    ({ data } = await Tesseract.recognize(source, 'spa+eng', { logger }));
+  } catch (primaryError) {
+    console.warn('OCR spa+eng falló, probando eng:', primaryError);
+    ({ data } = await Tesseract.recognize(source, 'eng', { logger }));
+  }
+
+    const found = [];
+  const topLimit = getAnonymizerCanvas().height * 0.32;
+  for (const word of data.words || []) {
+    const clean = String(word.text || '').toLowerCase().replace(/[^a-z0-9áéíóúñ]/g, '');
+    if (!clean) continue;
+    const y = word.bbox.y0 * anonymizerState.scale;
+    if (y > topLimit) continue;
+    const looksSensitive = KEYWORDS.some((k) => clean.includes(k))
+      || /@/.test(word.text)
+      || /\d{8}[A-Za-z]/.test(word.text)
+      || /(?:\d[\s.-]?){7,}/.test(word.text);
+    if (!looksSensitive) continue;
+    const wordWidth = (word.bbox.x1 - word.bbox.x0) * anonymizerState.scale;
+    const wordHeight = (word.bbox.y1 - word.bbox.y0) * anonymizerState.scale;
+    const fullLine = LINE_LABELS.some((k) => clean.includes(k));
+    found.push({
+      x: fullLine ? Math.max(0, word.bbox.x0 * anonymizerState.scale - 8) : word.bbox.x0 * anonymizerState.scale,
+      y,
+      w: fullLine
+        ? Math.max(180, getAnonymizerCanvas().width - (word.bbox.x0 * anonymizerState.scale) - 16)
+        : Math.max(90, Math.min(220, wordWidth * 3.2)),
+      h: Math.max(20, wordHeight * 1.35),
+    });
+    }
+    return found;
+}
+
+async function anonymizeAllLocalImages() {
+  const indexes = getCompatibleSubmissionIndexes();
+  if (!indexes.length) return alert('No hay entregas compatibles para anonimizar.');
+  const total = indexes.length;
+  for (let pos = 0; pos < total; pos++) {
+    const index = indexes[pos];
+    await openAnonymizer(index);
+    setAnonymizerStatus(`Procesando documento ${pos + 1} de ${total}…`, 0);
+    try {
+      if (anonymizerState.sourceType === 'pdf') {
+        for (let page = 1; page <= anonymizerState.pageCount; page++) {
+          anonymizerState.currentPage = page;
+          await renderCurrentPdfPage();
+          setCurrentAnonymizerRects(await detectSensitiveRectsInCurrentCanvas());
+          drawAnonymizerCanvas();
+        }
+        anonymizerState.currentPage = 1;
+        await renderCurrentPdfPage();
+      } else {
+        setCurrentAnonymizerRects(await detectSensitiveRectsInCurrentCanvas());
+        drawAnonymizerCanvas();
+      }
+      await saveAnonymizedImage(true);
+    } catch (e) {
+      console.error('Error anonimizado por lote:', e);
+    }
+  }
+  setAnonymizerStatus(`Anonimización automática completada para ${total} documento(s). Revisa este documento y usa Anterior/Siguiente para revisar el resto.`, 100);
+}
+
+async function saveAnonymizedImage(skipClose = false) {
+  const entry = state.localSubmissionFiles[anonymizerState.entryIndex];
+  const canvas = getAnonymizerCanvas();
+  if (!entry || !canvas) return;
+  const baseName = entry.originalFile.name.replace(/\.[^.]+$/, '');
+  if (anonymizerState.sourceType === 'pdf') {
+    const pages = [];
+    for (let page = 1; page <= anonymizerState.pageCount; page++) {
+      anonymizerState.currentPage = page;
+      await renderCurrentPdfPage();
+      drawAnonymizerCanvas();
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) return alert('No se pudo generar una página anonimizada del PDF.');
+      pages.push(new File([blob], `${baseName}_pag_${page}_anonimizada.png`, { type: 'image/png' }));
+    }
+    entry.anonymizedFiles = pages;
+    anonymizerState.currentPage = 1;
+    await renderCurrentPdfPage();
+  } else {
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) return alert('No se pudo generar la imagen anonimizada.');
+    entry.anonymizedFiles = [new File([blob], `${baseName}_anonimizado.png`, { type: 'image/png' })];
+  }
+  renderLocalSubmissionsList();
+  if (!skipClose) closeAnonymizer();
+}
+
+async function loadLocalTask() {
+  let courseName = document.getElementById('local-course-name').value.trim();
+  let taskName = document.getElementById('local-task-name').value.trim();
   if (!state.localSubmissionFiles.length) return alert('Sube al menos una entrega.');
 
-  const submissions = state.localSubmissionFiles.map((file, index) => ({
+  if (!courseName || !taskName) {
+    const inferred = await inferLocalContextFromFiles(state.localSubmissionFiles);
+    if (!courseName) courseName = inferred.courseName;
+    if (!taskName) taskName = inferred.taskName;
+    document.getElementById('local-course-name').value = courseName;
+    document.getElementById('local-task-name').value = taskName;
+  }
+
+  const submissions = state.localSubmissionFiles.map((entry, index) => ({
     id: `local-${index}`,
     studentId: `local-${index}`,
-    studentName: inferStudentNameFromFilename(file.name),
+    studentName: inferStudentNameFromFilename(entry.originalFile.name),
     studentEmail: '',
     state: 'LOCAL',
     late: false,
     hasSubmission: true,
     source: 'local',
-    localFiles: [file],
+    localFiles: getLocalSubmissionFiles(entry),
   }));
 
   state.task = {
