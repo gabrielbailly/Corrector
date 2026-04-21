@@ -1601,6 +1601,24 @@ app.post('/api/save-correction', express.json({ limit: '10mb' }), async (req, re
   }
 });
 
+app.post('/api/save-custom-report', express.json({ limit: '50mb' }), async (req, res) => {
+  const { dirName, filename, htmlContent } = req.body;
+  if (!dirName || !filename || !htmlContent) {
+    return res.status(400).json({ error: 'Faltan parámetros' });
+  }
+  try {
+    const outputDir = path.join(__dirname, 'correcciones', dirName);
+    await fsp.mkdir(outputDir, { recursive: true });
+    const safeFilename = `${sanitizeFilename(filename.replace(/\.html?$/i, ''))}.html`;
+    const htmlPath = path.join(outputDir, safeFilename);
+    await fsp.writeFile(htmlPath, htmlContent, 'utf-8');
+    res.json({ htmlFile: `correcciones/${dirName}/${safeFilename}`, htmlFilename: safeFilename });
+  } catch (e) {
+    console.error('save-custom-report error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/finalize-corrections', express.json({ limit: '10mb' }), async (req, res) => {
   const { dirName, rows, totalSubmissions, courseName = '', taskName = '' } = req.body;
   if (!dirName || !rows) return res.status(400).json({ error: 'Faltan parámetros' });

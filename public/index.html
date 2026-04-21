@@ -686,6 +686,7 @@ let state = {
   instructionTemplates: [],
   correctionOutput: null,
   correctionStartedAt: null,
+  generatedObjectUrls: [],
 };
 let anonymizerState = {
   entryIndex: null,
@@ -1315,7 +1316,12 @@ function drawAnonymizerCanvas(previewRect = null) {
 function getCanvasPointer(evt) {
   const canvas = getAnonymizerCanvas();
   const rect = canvas.getBoundingClientRect();
-  return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return {
+    x: (evt.clientX - rect.left) * scaleX,
+    y: (evt.clientY - rect.top) * scaleY,
+  };
 }
 
 function installAnonymizerCanvasEvents() {
@@ -1908,7 +1914,7 @@ function buildGroqContent(prompt, files) {
 }
 
 /** Build the correction prompt (mirrors server-side buildPrompt) */
-function buildPromptClient(taskName, courseName, instructions, numRef, numStudent) {
+function buildPromptClient(taskName, courseName, instructions, numRef, numStudent, options = {}) {
   let p = `Eres un profesor experto. Debes corregir la entrega del alumno para la tarea "${taskName}" del curso "${courseName}".\n\n`;
   if (numRef > 0) {
     p += `Los primeros ${numRef} archivo(s) adjunto(s) son el MATERIAL DE REFERENCIA del profesor (rúbrica, solución, criterios de evaluación).\nLos siguientes ${numStudent} archivo(s) son la ENTREGA DEL ALUMNO.\n\n`;
@@ -1917,6 +1923,9 @@ function buildPromptClient(taskName, courseName, instructions, numRef, numStuden
   }
   if (instructions && instructions.trim()) {
     p += `INSTRUCCIONES ESPECÍFICAS DEL PROFESOR:\n${instructions.trim()}\n\n`;
+  }
+  if (options.includeVisualAnnotations) {
+    p += `Además, como la entrega es visual, DEBES incluir anotaciones visuales aproximadas por página para superponer sobre el examen. Usa porcentajes verticales y comentarios breves de profesor. No omitas el bloque "anotaciones_visuales".\n\n`;
   }
   p += `Analiza el trabajo minuciosamente y responde ÚNICAMENTE con un objeto JSON con esta estructura exacta:
 
@@ -1928,7 +1937,21 @@ function buildPromptClient(taskName, courseName, instructions, numRef, numStuden
   "aspectos_mejora": ["<aspecto 1>", "<aspecto 2>", ...],
   "errores_graves": ["<error importante>", ...],
   "correccion_detallada": "<análisis detallado sección por sección o pregunta por pregunta>",
-  "feedforward": "<recomendaciones concretas y accionables para mejorar>"
+  "feedforward": "<recomendaciones concretas y accionables para mejorar>",
+  "anotaciones_visuales": {
+    "pages": [
+      {
+        "page_number": 1,
+        "page_grade": "<opcional>",
+        "annotations": [
+          {"y_percent": 25, "type": "correct", "text": null},
+          {"y_percent": 40, "type": "incorrect", "text": "<corrección breve>"},
+          {"y_percent": 55, "type": "partial", "text": "<qué falta>"},
+          {"y_percent": 70, "type": "comment", "text": "<comentario breve en margen>"}
+        ]
+      }
+    ]
+  }
 }
 
 REGLAS IMPORTANTES:
@@ -1938,6 +1961,8 @@ REGLAS IMPORTANTES:
 - Si el material de referencia incluye una rúbrica, refleja en la corrección detallada la nota o valoración de cada criterio relevante
 - En "correccion_detallada" separa claramente las ideas por apartados, preguntas o criterios, usando saltos de línea
 - En "feedforward" separa los consejos en pasos concretos o viñetas, una idea por línea
+- Si no puedes proponer anotaciones visuales útiles, devuelve "anotaciones_visuales": {"pages": []}
+- En las anotaciones visuales usa comentarios muy breves, útiles y legibles
 - Sé específico, constructivo y motivador
 - Responde SIEMPRE en español
 - Responde ÚNICAMENTE con el JSON, sin texto antes ni después`;
@@ -2110,7 +2135,7 @@ async function startCorrection() {
   const courseId   = state.task.courseId;
   const courseWorkId = state.task.courseWorkId;
   const instructions = document.getElementById('instructions').value;
-  const dirName = `${courseId}_${courseWorkId}`;
+  const dirName = courseId && courseWorkId ? `${courseId}_${courseWorkId}` : `local_${Date.now()}`;
 
   // Read teacher reference files as base64 (they're File objects in state.refFiles)
   const refFiles = await Promise.all((state.refFiles || []).map(async f => ({
@@ -2165,7 +2190,11 @@ async function startCorrection() {
       if (!studentFiles.length) throw new Error('No se pudieron descargar los archivos de la entrega');
 
       const allFiles = [...refFiles, ...studentFiles];
-      const prompt = buildPromptClient(taskName, courseName, instructions, refFiles.length, studentFiles.length);
+      const visualSubmission = studentFiles.some((f) => {
+        const meta = getRenderableFileMeta(f);
+        return meta.mimeType.startsWith('image/') || meta.mimeType === 'application/pdf';
+      });
+      const prompt = buildPromptClient(taskName, courseName, instructions, refFiles.length, studentFiles.length, { includeVisualAnnotations: visualSubmission });
       const providerLabel = aiCfg.provider === 'gemini' ? 'Gemini' : 'Groq';
 
       updateStudentPhase(i, selected.length, `Preparando archivos de ${studentName} para ${providerLabel}…`, studentName, 0.35);
@@ -2196,7 +2225,21 @@ async function startCorrection() {
         throw new Error(saved.error || `Error guardando la correccion: ${saveRes.status}`);
       }
 
-      addResultItem('done', studentName, correction.nota, correction.evaluacion_general, saved.htmlFile);
+      let htmlTarget = saved.htmlFile;
+      let annotatedLinks = [];
+      let mainLinkLabel = 'Ver informe →';
+      if (visualSubmission) {
+        const annotated = await generateAnnotatedArtifacts(dirName, studentName, taskName, courseName, studentFiles, correction);
+        mainLinkLabel = 'Ver informe →';
+        if (annotated?.htmlHref) {
+          const annotatedHref = String(annotated.htmlHref).startsWith('blob:') || String(annotated.htmlHref).startsWith('/')
+            ? annotated.htmlHref
+            : `/${annotated.htmlHref}`;
+          annotatedLinks.push({ label: 'Ver informe anotado →', href: annotatedHref });
+        }
+        annotatedLinks = annotatedLinks.concat(annotated?.extraLinks || []);
+      }
+      addResultItem('done', studentName, correction.nota, correction.evaluacion_general, htmlTarget, annotatedLinks, mainLinkLabel);
 
       const nota = correction.nota !== null && correction.nota !== undefined ? Number(correction.nota) : '';
       excelRows.push({
@@ -2327,7 +2370,7 @@ function updateStudentPhase(index, total, msg, student, phase = 0) {
   updateProgress(pct, total, msg, index + 1, student);
 }
 
-function addResultItem(type, name, nota, summary, htmlFile) {
+function addResultItem(type, name, nota, summary, htmlFile, extraLinks = [], mainLinkLabel = 'Ver informe →') {
   const list = document.getElementById('student-results');
   const item = document.createElement('div');
   item.className = 'result-item';
@@ -2339,15 +2382,18 @@ function addResultItem(type, name, nota, summary, htmlFile) {
     : nota >= 5 ? 'nota-media'
     : 'nota-baja';
 
-  const linkHtml = htmlFile
-    ? `<a href="/${htmlFile}" target="_blank" class="result-link">Ver corrección →</a>`
+  const htmlHref = htmlFile ? (String(htmlFile).startsWith('blob:') ? htmlFile : `/${htmlFile}`) : '';
+  const linkHtml = htmlHref
+    ? `<a href="${htmlHref}" target="_blank" class="result-link">${esc(mainLinkLabel)}</a>`
     : '';
+  const extraHtml = extraLinks.map((link) => `<a href="${link.href}" ${link.download ? `download="${esc(link.download)}"` : 'target="_blank"'} class="result-link">${esc(link.label)}</a>`).join(' ');
 
   item.innerHTML = `
     <span class="result-icon">${icon}</span>
     <span class="result-name">${esc(name)}</span>
     <span class="result-nota ${notaClass}">${notaStr ? notaStr + '/10' : ''}</span>
     ${linkHtml}
+    ${extraHtml}
   `;
   list.appendChild(item);
   list.scrollTop = list.scrollHeight;
@@ -2425,12 +2471,14 @@ function startRetryCountdown(totalSec, attempt, max) {
 }
 
 function newCorrection() {
+  state.generatedObjectUrls.forEach((url) => URL.revokeObjectURL(url));
   state.task = null;
   state.submissions = [];
   state.selected.clear();
   state.refFiles = [];
   state.localSubmissionFiles = [];
   state.correctionOutput = null;
+  state.generatedObjectUrls = [];
   location.reload();
 }
 
@@ -2469,6 +2517,270 @@ function formatElapsedTime(ms) {
   if (minutes === 0) return `${seconds}s`;
   if (seconds === 0) return `${minutes} min`;
   return `${minutes} min ${seconds}s`;
+}
+
+function getRenderableFileMeta(file) {
+  const rawName = String(file?.name || 'archivo')
+  const lowerName = rawName.toLowerCase()
+  let mimeType = String(file?.type || file?.mimeType || '')
+  if (!mimeType && lowerName.endsWith('.pdf')) mimeType = 'application/pdf'
+  if (!mimeType && /\.(png|jpe?g|webp|gif)$/i.test(lowerName)) mimeType = 'image/png'
+  return {
+    mimeType,
+    name: rawName,
+    isBrowserFile: typeof File !== 'undefined' && file instanceof File,
+  };
+}
+
+async function fileLikeToDataUrl(file) {
+  const meta = getRenderableFileMeta(file);
+  if (meta.isBrowserFile) {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  if (file?.dataBase64 && meta.mimeType) {
+    return `data:${meta.mimeType};base64,${file.dataBase64}`;
+  }
+  return '';
+}
+
+async function fileLikeToArrayBuffer(file) {
+  const meta = getRenderableFileMeta(file);
+  if (meta.isBrowserFile) return await file.arrayBuffer();
+  if (file?.dataBase64) {
+    const binary = atob(file.dataBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+  return null;
+}
+
+async function renderFileToPageImages(file) {
+  const meta = getRenderableFileMeta(file);
+  if (meta.mimeType.startsWith('image/')) {
+    const image = new Image();
+    const src = await fileLikeToDataUrl(file);
+    if (!src) return [];
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+      image.src = src;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    canvas.getContext('2d').drawImage(image, 0, 0);
+    return [{ pageNumber: 1, image, width: image.width, height: image.height, sourceName: meta.name, dataUrl: canvas.toDataURL('image/png') }];
+  }
+  if (meta.mimeType === 'application/pdf' && window.pdfjsLib) {
+    const pdfjs = window.pdfjsLib;
+    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    const bytes = await fileLikeToArrayBuffer(file);
+    if (!bytes) return [];
+    const pdfDoc = await pdfjs.getDocument({ data: bytes }).promise;
+    const pages = [];
+    for (let pageNo = 1; pageNo <= pdfDoc.numPages; pageNo++) {
+      const page = await pdfDoc.getPage(pageNo);
+      const viewport = page.getViewport({ scale: 1.4 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const image = new Image();
+      image.src = canvas.toDataURL('image/png');
+      await new Promise((resolve) => { image.onload = resolve; });
+      pages.push({ pageNumber: pageNo, image, width: canvas.width, height: canvas.height, sourceName: meta.name, dataUrl: canvas.toDataURL('image/png') });
+    }
+    return pages;
+  }
+  return [];
+}
+
+function drawRoundedRect(ctx, x, y, w, h, radius, fillStyle, strokeStyle = null, lineWidth = 1) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+  ctx.fillStyle = fillStyle;
+  ctx.fill();
+  if (strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  }
+}
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth || !current) current = test;
+    else { lines.push(current); current = word; }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function buildFallbackVisualAnnotations(pageImages, correction) {
+  const detailed = String(correction?.correccion_detallada || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 6)
+  const general = String(correction?.evaluacion_general || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 2)
+  const feedforward = String(correction?.feedforward || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 3)
+  const comments = [...general, ...detailed, ...feedforward]
+    .filter(Boolean)
+    .filter((text, idx, arr) => arr.findIndex((item) => item.toLowerCase() === text.toLowerCase()) === idx)
+  if (!comments.length) return { pages: [] }
+  return {
+    pages: pageImages.map((page, idx) => ({
+      page_number: page.pageNumber,
+      annotations: comments.slice(0, 4).map((text, commentIdx) => ({
+        y_percent: 18 + commentIdx * 18,
+        type: idx === 0 && commentIdx === 0 ? 'comment' : commentIdx % 2 === 0 ? 'partial' : 'comment',
+        text,
+      })),
+    })),
+  }
+}
+
+async function generateAnnotatedArtifacts(dirName, studentName, taskName, courseName, localFiles, correction) {
+  const visual = correction?.anotaciones_visuales?.pages;
+  const pageImages = [];
+  for (const file of localFiles || []) {
+    try {
+      pageImages.push(...await renderFileToPageImages(file));
+    } catch (e) {
+      console.error('No se pudo renderizar archivo visual para informe anotado:', file?.name, e)
+    }
+  }
+  if (!pageImages.length) {
+    console.warn('Informe anotado no generado: sin páginas renderizables', localFiles)
+    return null;
+  }
+  const resolvedVisual = Array.isArray(visual) && visual.length
+    ? { pages: visual }
+    : buildFallbackVisualAnnotations(pageImages, correction);
+  if (!resolvedVisual.pages.length) {
+    console.warn('Informe anotado no generado: sin anotaciones visuales ni fallback útil', correction)
+    return null;
+  }
+
+  const reportPages = [];
+  for (const page of pageImages) {
+    const ann = resolvedVisual.pages.find((item) => Number(item.page_number) === Number(page.pageNumber));
+    if (!ann) continue;
+    const url = page.dataUrl || page.image.src;
+    const comments = (ann.annotations || []).filter((item) => item.text).map((item, idx) => ({
+      idx,
+      type: item.type || 'comment',
+      yPercent: Number(item.y_percent || 0),
+      text: item.text || '',
+    }));
+    reportPages.push({
+      pageNumber: page.pageNumber,
+      imageUrl: url,
+      comments,
+    });
+  }
+  if (!reportPages.length) {
+    console.warn('Informe anotado no generado: las anotaciones no se pudieron asociar a páginas', resolvedVisual)
+    return null;
+  }
+
+  const nota = correction?.nota !== null && correction?.nota !== undefined ? Number(correction.nota).toFixed(1) : '—';
+  const htmlTemplate = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corrección anotada: ${esc(studentName)}</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;margin:0;padding:0;line-height:1.45}
+.wrap{max-width:1100px;margin:0 auto;padding:1.25rem}
+.hero{background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);color:#fff;border-radius:16px;padding:1.2rem 1.3rem;margin-bottom:1rem}
+.hero h1{margin:0 0 .25rem 0;font-size:1.35rem}.hero p{margin:.1rem 0;opacity:.92}.hero .grade{display:inline-block;background:#fff;color:#1e3a8a;font-weight:900;border-radius:12px;padding:.3rem .75rem;margin-top:.55rem}.top-tools{margin-top:.75rem;display:flex;gap:.6rem;flex-wrap:wrap}.save-status{font-size:.82rem;opacity:.95;align-self:center}
+.page-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:1rem;margin-bottom:1rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.page-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:.75rem}.page-head strong{font-size:1rem}
+.page-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:1rem;align-items:start}
+.exam-frame{position:relative;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#fff;cursor:crosshair}
+.exam-frame img{display:block;width:100%;height:auto}
+.guide-line{position:absolute;left:0;right:0;height:0;border-top:2px dashed rgba(37,99,235,.45);pointer-events:none}.guide-dot{position:absolute;right:10px;top:-5px;width:10px;height:10px;border-radius:999px;background:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.comment-list{position:relative}.comment-card{position:absolute;left:0;right:0;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff;padding:.55rem .65rem}.comment-card summary{cursor:pointer;font-weight:700;color:#1d4ed8}.comment-card p{margin:.45rem 0 0 0;font-size:.9rem;color:#334155}.comment-editor{width:100%;min-height:96px;border:1px solid #bfdbfe;border-radius:10px;padding:.65rem .75rem;font:inherit;color:#334155;resize:vertical;background:#fff}.comment-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.55rem}.mini-btn{border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;border-radius:10px;padding:.42rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer}.mini-btn:hover{background:#eff6ff}.click-help{font-size:.8rem;color:#64748b;margin-top:.5rem}.comment-placeholder{position:absolute;left:0;right:0;top:0;border:1px dashed #dbeafe;border-radius:12px;background:#f8fbff;padding:.8rem;color:#64748b}.feedforward-box{margin-top:1rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:.9rem 1rem}.feedforward-box h3{margin:0 0 .4rem 0;color:#1d4ed8;font-size:.96rem}.feedforward-box p{margin:0;color:#334155;white-space:pre-wrap}
+@media(max-width:840px){.page-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <h1>${esc(taskName)}</h1>
+    <p>${esc(courseName)} · ${esc(studentName)}</p>
+    <p class="grade">Nota: ${nota}/10</p>
+    <div class="top-tools">
+      <span class="save-status" id="save-status">Los cambios en comentarios se guardan automáticamente.</span>
+    </div>
+  </div>
+  ${reportPages.map((page) => `
+    <section class="page-card">
+      <div class="page-head"><strong>Página ${page.pageNumber}</strong></div>
+      <div class="page-grid">
+        <div class="exam-frame">
+          <img src="${page.imageUrl}" alt="Página ${page.pageNumber}" data-page="${page.pageNumber}" />
+        </div>
+        <div class="comment-list" id="comment-list-${page.pageNumber}" data-page="${page.pageNumber}">
+          ${page.comments.length ? page.comments.map((comment, idx, arr) => {
+            return `
+            <details class="comment-card" data-page="${page.pageNumber}" data-y-percent="${Math.round(comment.yPercent)}">
+              <summary>${comment.type === 'correct' ? '✓ Acierto' : comment.type === 'incorrect' ? '✗ Corrección' : comment.type === 'partial' ? '~ Parcial' : '💬 Comentario'} · ${Math.round(comment.yPercent)}%</summary>
+              <p>${esc(comment.text)}</p>
+              <div class="comment-actions">
+                <button class="mini-btn" type="button" onclick="editComment(this)">Editar</button>
+                <button class="mini-btn" type="button" onclick="deleteComment(this)">Eliminar</button>
+              </div>
+            </details>`;
+          }).join('') : '<div class="comment-placeholder">Sin comentarios visuales en esta página.</div>'}
+          <div class="comment-actions" style="margin-top:.35rem">
+            <button class="mini-btn" type="button" onclick="addComment(${page.pageNumber})">+ Añadir comentario</button>
+          </div>
+          <div class="click-help">Haz clic sobre la imagen para añadir un comentario en esa altura de la página.</div>
+        </div>
+      </div>
+      <div class="feedforward-box">
+        <h3>Consejos para mejorar</h3>
+        <p>${esc(correction.feedforward || 'No disponible')}</p>
+      </div>
+    </section>`).join('')}
+</div>
+<script id="report-config" type="application/json">${JSON.stringify({ dirName, filename: studentName + '_anotado' })}<\/script>
+<script src="/annotated-report.js"><\/script>
+</body>
+</html>`;
+  const html = htmlTemplate;
+  try {
+    const saveRes = await fetch('/api/save-custom-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dirName, filename: studentName + '_anotado', htmlContent: html }),
+    });
+    const saved = await saveRes.json().catch(() => ({}));
+    if (saveRes.ok && saved.htmlFile) {
+      return { htmlHref: saved.htmlFile, extraLinks: [] };
+    }
+    console.error('No se pudo guardar informe anotado en servidor:', saved.error || saveRes.status);
+  } catch (e) {
+    console.error('Error guardando informe anotado en servidor:', e);
+  }
+  const htmlBlob = new Blob([html], { type: 'text/html' });
+  const htmlHref = URL.createObjectURL(htmlBlob);
+  state.generatedObjectUrls.push(htmlHref);
+  return { htmlHref, extraLinks: [] };
 }
 </script>
 </body>
