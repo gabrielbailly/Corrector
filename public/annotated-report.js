@@ -119,7 +119,7 @@
     card.dataset.yPercent = String(Math.round(yPercent))
     card.open = true
     card.innerHTML =
-      '<summary>Comentario nuevo · ' + Math.round(yPercent) + '%</summary>' +
+      '<summary>💬 Comentario nuevo</summary>' +
       '<textarea class="comment-editor" placeholder="Escribe aquí el comentario del profesor..."></textarea>' +
       '<div class="comment-actions">' +
       '<button class="mini-btn" type="button">Guardar comentario</button>' +

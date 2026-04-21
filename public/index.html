@@ -2738,7 +2738,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           ${page.comments.length ? page.comments.map((comment, idx, arr) => {
             return `
             <details class="comment-card" data-page="${page.pageNumber}" data-y-percent="${Math.round(comment.yPercent)}">
-              <summary>${comment.type === 'correct' ? '✓ Acierto' : comment.type === 'incorrect' ? '✗ Corrección' : comment.type === 'partial' ? '~ Parcial' : '💬 Comentario'} · ${Math.round(comment.yPercent)}%</summary>
+              <summary>${comment.type === 'correct' ? '✓ Acierto' : comment.type === 'incorrect' ? '✗ Corrección' : comment.type === 'partial' ? '~ Parcial' : '💬 Comentario'}</summary>
               <p>${esc(comment.text)}</p>
               <div class="comment-actions">
                 <button class="mini-btn" type="button" onclick="editComment(this)">Editar</button>
