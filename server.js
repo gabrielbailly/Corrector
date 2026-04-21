@@ -229,9 +229,11 @@ async function deleteInstructionTemplateForUser(userKey, name) {
 const SCOPES = [
   'https://www.googleapis.com/auth/classroom.courses.readonly',
   'https://www.googleapis.com/auth/classroom.coursework.students.readonly',
+  'https://www.googleapis.com/auth/classroom.courseworkmaterials',
   'https://www.googleapis.com/auth/classroom.student-submissions.students.readonly',
   'https://www.googleapis.com/auth/classroom.rosters.readonly',
   'https://www.googleapis.com/auth/drive.appdata',
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -1616,6 +1618,53 @@ app.post('/api/save-custom-report', express.json({ limit: '50mb' }), async (req,
   } catch (e) {
     console.error('save-custom-report error:', e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+async function uploadReportToDrive(localPath, reportName) {
+  const drive = google.drive({ version: 'v3', auth: oauth2Client });
+  const fileMetadata = { name: reportName };
+  const media = { mimeType: 'text/html', body: fs.createReadStream(localPath) };
+  const created = await drive.files.create({ requestBody: fileMetadata, media, fields: 'id,name,webViewLink' });
+  return created.data;
+}
+
+app.post('/api/publish-classroom-reports', express.json({ limit: '5mb' }), async (req, res) => {
+  if (!requireGoogleSession(req, res)) return;
+  const { courseId, taskName, reports } = req.body;
+  if (!courseId || !Array.isArray(reports) || !reports.length) {
+    return res.status(400).json({ error: 'Faltan parámetros para publicar en Classroom.' });
+  }
+  try {
+    const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
+    const published = [];
+    for (const report of reports) {
+      if (!report.studentId || !Array.isArray(report.files) || !report.files.length) continue;
+      const materials = [];
+      for (const relativePath of report.files) {
+        const localPath = path.join(__dirname, relativePath);
+        if (!localPath.startsWith(path.join(__dirname, 'correcciones')) || !fs.existsSync(localPath)) continue;
+        const upload = await uploadReportToDrive(localPath, path.basename(localPath));
+        materials.push({ driveFile: { driveFile: { id: upload.id }, shareMode: 'VIEW' } });
+      }
+      if (!materials.length) continue;
+      const created = await classroom.courses.courseWorkMaterials.create({
+        courseId,
+        requestBody: {
+          title: `Devolucion: ${taskName} - ${report.studentName}`,
+          description: `Informe(s) de correccion para ${report.studentName}.`,
+          state: 'PUBLISHED',
+          materials,
+          assigneeMode: 'INDIVIDUAL_STUDENTS',
+          individualStudentsOptions: { studentIds: [report.studentId] },
+        },
+      });
+      published.push({ studentName: report.studentName, workId: created.data.id });
+    }
+    res.json({ success: true, published });
+  } catch (e) {
+    console.error('publish-classroom-reports error:', e.response?.data || e.message);
+    res.status(500).json({ error: e.response?.data?.error?.message || e.message });
   }
 });
 

@@ -687,6 +687,7 @@ let state = {
   correctionOutput: null,
   correctionStartedAt: null,
   generatedObjectUrls: [],
+  classroomReports: [],
 };
 let anonymizerState = {
   entryIndex: null,
@@ -2107,6 +2108,7 @@ async function startCorrection() {
   const selected = getSelectedSubmissions();
   if (selected.length === 0) return alert('Selecciona al menos un alumno.');
   state.correctionStartedAt = Date.now();
+  state.classroomReports = [];
 
   // Swap UI
   document.getElementById('step3-content').classList.add('hidden');
@@ -2238,6 +2240,15 @@ async function startCorrection() {
           annotatedLinks.push({ label: 'Ver informe anotado →', href: annotatedHref });
         }
         annotatedLinks = annotatedLinks.concat(annotated?.extraLinks || []);
+      }
+      if (sub.source !== 'local') {
+        const filesForClassroom = [];
+        if (saved.htmlFile && !String(saved.htmlFile).startsWith('blob:')) filesForClassroom.push(saved.htmlFile);
+        const annotatedServerFile = annotatedLinks.find((link) => String(link.href || '').startsWith('/correcciones/'));
+        if (annotatedServerFile) filesForClassroom.push(annotatedServerFile.href.slice(1));
+        if (filesForClassroom.length) {
+          state.classroomReports.push({ studentId: sub.studentId, studentName, files: filesForClassroom });
+        }
       }
       addResultItem('done', studentName, correction.nota, correction.evaluacion_general, htmlTarget, annotatedLinks, mainLinkLabel);
 
@@ -2430,6 +2441,7 @@ function showResults(data) {
     <a href="/api/download-file?path=${encodeURIComponent(data.excelFile)}" class="download-btn">
       <span class="icon">📊</span> Descargar Excel
     </a>
+    ${state.task?.courseId && state.classroomReports.length ? `<button class="download-btn" onclick="publishReportsToClassroom()"><span class="icon">📤</span> Publicar devolución en Classroom</button>` : ''}
   `;
 
   const resList = document.getElementById('results-list');
@@ -2443,6 +2455,29 @@ function showResults(data) {
       Desde ahí puedes imprimirlo o guardarlo como PDF.<br>
       Usa <strong>"Descargar TODO como ZIP"</strong> para obtener todos los archivos a la vez.
     </p>`;
+}
+
+async function publishReportsToClassroom() {
+  if (!state.task?.courseId || !state.classroomReports.length) {
+    return alert('No hay informes de Classroom para publicar.');
+  }
+  if (!confirm('Se creará una publicación individual por alumno en este curso con sus informes adjuntos. ¿Continuar?')) return;
+  try {
+    const res = await fetch('/api/publish-classroom-reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        courseId: state.task.courseId,
+        taskName: state.task.task,
+        reports: state.classroomReports,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'No se pudo publicar en Classroom');
+    alert(`Publicación completada para ${data.published?.length || 0} alumno(s).`);
+  } catch (e) {
+    alert(`Error publicando en Classroom: ${e.message}`);
+  }
 }
 
 // Countdown visible cuando la API pide esperar
@@ -2479,6 +2514,7 @@ function newCorrection() {
   state.localSubmissionFiles = [];
   state.correctionOutput = null;
   state.generatedObjectUrls = [];
+  state.classroomReports = [];
   location.reload();
 }
 
