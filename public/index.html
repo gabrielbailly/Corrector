@@ -131,6 +131,10 @@ textarea{resize:vertical;min-height:90px}
 .modal-title{font-size:1rem;font-weight:800}
 .modal-subtitle{font-size:.82rem;color:var(--text-muted);margin-top:.15rem}
 .modal-close{border:none;background:transparent;font-size:1.2rem;cursor:pointer;color:var(--text-muted)}
+.floating-status{position:fixed;right:18px;bottom:18px;background:rgba(15,23,42,.92);color:#fff;padding:.8rem 1rem;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.2);z-index:400;font-size:.9rem;display:flex;align-items:center;gap:.65rem}
+.floating-status.hidden{display:none}
+.floating-dot{width:10px;height:10px;border-radius:999px;background:#60a5fa;box-shadow:0 0 0 0 rgba(96,165,250,.55);animation:pulse 1.6s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(96,165,250,.55)}70%{box-shadow:0 0 0 12px rgba(96,165,250,0)}100%{box-shadow:0 0 0 0 rgba(96,165,250,0)}}
 .anonymizer-layout{display:grid;grid-template-columns:1.5fr .9fr;gap:1rem}
 .anonymizer-canvas-wrap{background:#f8fafc;border:1px solid var(--border);border-radius:var(--radius-sm);padding:.75rem;overflow:auto}
 .anonymizer-canvas{display:block;max-width:100%;cursor:crosshair;border-radius:.35rem}
@@ -453,9 +457,10 @@ textarea{resize:vertical;min-height:90px}
             <p><strong>Haz clic para subir las entregas</strong> o arrástralas aquí</p>
             <p style="font-size:.78rem;margin-top:.25rem;color:#94a3b8">Cada archivo se tratará como la entrega de un alumno. El nombre del archivo se usará como nombre del alumno.</p>
           </div>
+          <p class="text-muted mt-1" id="local-pdf-hint">🔒 Si subes un PDF con varios exámenes, la app intentará separarlos por alumno y anonimizará automáticamente las páginas antes de enviarlas a la IA.</p>
           <div class="file-list" id="local-submissions-list"></div>
           <div class="mt-2">
-            <button class="btn btn-secondary" onclick="anonymizeAllLocalImages()">Anonimizar entregas compatibles</button>
+            <button class="btn btn-secondary" id="btn-bulk-anonymize-local" onclick="anonymizeAllLocalImages()">Anonimizar entregas compatibles</button>
             <button class="btn btn-primary" onclick="loadLocalTask()">Cargar entregas locales</button>
           </div>
         </div>
@@ -656,6 +661,11 @@ textarea{resize:vertical;min-height:90px}
       </div>
     </div>
   </div>
+</div>
+
+<div id="floating-status" class="floating-status hidden">
+  <span class="floating-dot"></span>
+  <span id="floating-status-text">Procesando…</span>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
@@ -1123,14 +1133,23 @@ function handleLocalDrop(e) {
 
 function renderLocalSubmissionsList() {
   const list = document.getElementById('local-submissions-list');
+  const bulkBtn = document.getElementById('btn-bulk-anonymize-local');
+  const pdfHint = document.getElementById('local-pdf-hint');
   if (!list) return;
   list.innerHTML = '';
+  const pdfCount = state.localSubmissionFiles.filter((entry) => isPdfSubmission(entry)).length;
+  if (bulkBtn) bulkBtn.classList.remove('hidden');
+  if (pdfHint) {
+    pdfHint.textContent = pdfCount === 1 && state.localSubmissionFiles.length === 1
+      ? '🔒 Si este PDF contiene varios exámenes juntos, mejor pulsa “Cargar entregas locales” para que la app los separe y anonimice automáticamente antes de corregir.'
+      : '🔒 Si subes un PDF con varios exámenes, la app intentará separarlos por alumno y anonimizará automáticamente las páginas antes de enviarlas a la IA.';
+  }
   state.localSubmissionFiles.forEach((entry, i) => {
     const file = getLocalSubmissionFiles(entry)[0];
     const item = document.createElement('div');
     const studentName = inferStudentNameFromFilename(entry.originalFile.name);
     const size = file.size > 1e6 ? (file.size / 1e6).toFixed(1) + ' MB' : (file.size / 1024).toFixed(0) + ' KB';
-    const isCompatible = isImageSubmission(entry) || isPdfSubmission(entry);
+    const canManualAnonymize = isImageSubmission(entry) || isPdfSubmission(entry);
     item.className = 'file-item';
     item.innerHTML = `
       <span class="file-icon">🧑‍🎓</span>
@@ -1138,7 +1157,7 @@ function renderLocalSubmissionsList() {
       <span class="file-size">${esc(file.name)} · ${size}${entry.anonymizedFiles?.length > 1 ? ` · ${entry.anonymizedFiles.length} pág.` : ''}</span>
       <span class="file-actions">
         ${entry.anonymizedFiles?.length ? '<span class="file-badge">Anonimizada</span>' : ''}
-        ${isCompatible ? `<button class="file-mini-btn" onclick="openAnonymizer(${i})">Anonimizar</button>` : ''}
+        ${canManualAnonymize ? `<button class="file-mini-btn" onclick="openAnonymizer(${i})">Anonimizar</button>` : ''}
         <span class="file-remove" onclick="removeLocalSubmission(${i})" title="Quitar">✕</span>
       </span>
     `;
@@ -1235,6 +1254,162 @@ async function extractLocalTextSnippet(file) {
   return '';
 }
 
+function inferStudentNameFromHeaderText(text, fallback = '') {
+  const lines = String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 12);
+  const nameLabels = ['nombre', 'alumno', 'alumna', 'estudiante', 'apellidos'];
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    for (const label of nameLabels) {
+      const idx = lower.indexOf(label);
+      if (idx >= 0) {
+        const remainder = cleanDetectedLabel(line.slice(idx + label.length)).replace(/^y\s+apellidos\s*/i, '').trim();
+        if (remainder.split(/\s+/).length >= 2) return remainder.slice(0, 60);
+      }
+    }
+  }
+  const probable = lines.find((line) => /^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ' -]{5,}$/.test(line) && line.split(/\s+/).length <= 5);
+  return probable || fallback || '';
+}
+
+async function ocrTopOfPageImage(pageImage) {
+  if (!window.Tesseract) return '';
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = pageImage.width;
+  cropCanvas.height = Math.max(160, Math.round(pageImage.height * 0.22));
+  cropCanvas.getContext('2d').drawImage(pageImage.image, 0, 0, pageImage.width, cropCanvas.height, 0, 0, cropCanvas.width, cropCanvas.height);
+  try {
+    const { data } = await Tesseract.recognize(cropCanvas.toDataURL('image/png'), 'spa+eng');
+    return String(data?.text || '').slice(0, 1200);
+  } catch (e) {
+    return '';
+  }
+}
+
+async function autoAnonymizePageImage(pageImage, pageIndex) {
+  if (!window.Tesseract) {
+    const res = await fetch(pageImage.dataUrl || pageImage.image.src);
+    const blob = await res.blob();
+    return new File([blob], `entrega_${pageIndex + 1}.png`, { type: 'image/png' });
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = pageImage.width;
+  canvas.height = pageImage.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(pageImage.image, 0, 0, pageImage.width, pageImage.height);
+
+  const cropHeight = Math.max(160, Math.round(pageImage.height * 0.25));
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = pageImage.width;
+  cropCanvas.height = cropHeight;
+  cropCanvas.getContext('2d').drawImage(pageImage.image, 0, 0, pageImage.width, cropHeight, 0, 0, cropCanvas.width, cropCanvas.height);
+
+  try {
+    const { data } = await Tesseract.recognize(cropCanvas.toDataURL('image/png'), 'spa+eng');
+    const KEYWORDS = ['nombre', 'alumno', 'alumna', 'estudiante', 'apellido', 'apellidos', 'dni', 'nie', 'nif', 'correo', 'email'];
+    const LINE_LABELS = ['nombre', 'alumno', 'alumna', 'estudiante', 'apellido', 'apellidos'];
+    ctx.fillStyle = '#000';
+    for (const word of data.words || []) {
+      const clean = String(word.text || '').toLowerCase().replace(/[^a-z0-9áéíóúñ]/g, '');
+      if (!clean) continue;
+      const looksSensitive = KEYWORDS.some((k) => clean.includes(k))
+        || /@/.test(word.text)
+        || /\d{8}[A-Za-z]/.test(word.text)
+        || /(?:\d[\s.-]?){7,}/.test(word.text);
+      if (!looksSensitive) continue;
+      const fullLine = LINE_LABELS.some((k) => clean.includes(k));
+      const x = Math.max(0, word.bbox.x0 - 8);
+      const y = Math.max(0, word.bbox.y0 - 4);
+      const w = fullLine ? Math.max(180, canvas.width - x - 16) : Math.max(90, Math.min(240, (word.bbox.x1 - word.bbox.x0) * 3.2));
+      const h = Math.max(20, (word.bbox.y1 - word.bbox.y0) * 1.4);
+      ctx.fillRect(x, y, w, h);
+    }
+  } catch (e) {
+    console.warn('Autoanonimización OCR falló en página', pageIndex + 1, e);
+  }
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  return new File([blob], `entrega_${pageIndex + 1}.png`, { type: 'image/png' });
+}
+
+async function pageImagesToFiles(pageImages, baseName) {
+  return await Promise.all(pageImages.map(async (page, idx) => {
+    const res = await fetch(page.dataUrl || page.image.src);
+    const blob = await res.blob();
+    return new File([blob], `${baseName}_pag_${idx + 1}.png`, { type: 'image/png' });
+  }));
+}
+
+async function splitPdfEntryIntoSubmissions(entry, entryIndex) {
+  const originalPages = await renderFileToPageImages(entry.originalFile);
+  if (originalPages.length <= 1) {
+    return [{
+      id: `local-${entryIndex}`,
+      studentId: `local-${entryIndex}`,
+      studentName: inferStudentNameFromFilename(entry.originalFile.name),
+      studentEmail: '',
+      state: 'LOCAL',
+      late: false,
+      hasSubmission: true,
+      source: 'local',
+      localFiles: getLocalSubmissionFiles(entry),
+    }];
+  }
+
+  const pageTexts = [];
+  for (const page of originalPages) pageTexts.push(await ocrTopOfPageImage(page));
+
+  const boundaries = [0];
+  let prevName = inferStudentNameFromHeaderText(pageTexts[0]);
+  for (let i = 1; i < originalPages.length; i++) {
+    const currentName = inferStudentNameFromHeaderText(pageTexts[i]);
+    const hasHeader = /nombre|alumno|alumna|estudiante|apellidos/i.test(pageTexts[i]);
+    if (hasHeader && currentName && currentName !== prevName) {
+      boundaries.push(i);
+      prevName = currentName;
+    }
+  }
+  boundaries.push(originalPages.length);
+
+  if (boundaries.length <= 2) {
+    return [{
+      id: `local-${entryIndex}`,
+      studentId: `local-${entryIndex}`,
+      studentName: prevName || inferStudentNameFromFilename(entry.originalFile.name),
+      studentEmail: '',
+      state: 'LOCAL',
+      late: false,
+      hasSubmission: true,
+      source: 'local',
+      localFiles: getLocalSubmissionFiles(entry),
+    }];
+  }
+
+  const submissions = [];
+  for (let group = 0; group < boundaries.length - 1; group++) {
+    const start = boundaries[group];
+    const end = boundaries[group + 1];
+    const pageSlice = originalPages.slice(start, end);
+    const pages = [];
+    for (let idx = 0; idx < pageSlice.length; idx++) {
+      pages.push(await autoAnonymizePageImage(pageSlice[idx], idx));
+    }
+    const studentName = `Alumno ${group + 1}`;
+    submissions.push({
+      id: `local-${entryIndex}-${group}`,
+      studentId: `local-${entryIndex}-${group}`,
+      studentName,
+      studentEmail: '',
+      state: 'LOCAL',
+      late: false,
+      hasSubmission: true,
+      source: 'local',
+      localFiles: pages,
+    });
+  }
+  return submissions;
+}
+
 async function inferLocalContextFromFiles(entries) {
   const samples = entries.slice(0, 3).map((entry) => getLocalSubmissionFile(entry));
   let combined = '';
@@ -1257,6 +1432,17 @@ function setAnonymizerStatus(text, pct = 0) {
   const bar = document.getElementById('anonymizer-progress-bar');
   if (status) status.textContent = text;
   if (bar) bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function showFloatingStatus(text) {
+  const box = document.getElementById('floating-status');
+  const label = document.getElementById('floating-status-text');
+  if (label) label.textContent = text;
+  if (box) box.classList.remove('hidden');
+}
+
+function hideFloatingStatus() {
+  document.getElementById('floating-status')?.classList.add('hidden');
 }
 
 function getAnonymizerCanvas() {
@@ -1616,6 +1802,8 @@ async function loadLocalTask() {
   let taskName = document.getElementById('local-task-name').value.trim();
   if (!state.localSubmissionFiles.length) return alert('Sube al menos una entrega.');
 
+  showFloatingStatus('Procesando entregas…');
+
   if (!courseName || !taskName) {
     const inferred = await inferLocalContextFromFiles(state.localSubmissionFiles);
     if (!courseName) courseName = inferred.courseName;
@@ -1624,17 +1812,30 @@ async function loadLocalTask() {
     document.getElementById('local-task-name').value = taskName;
   }
 
-  const submissions = state.localSubmissionFiles.map((entry, index) => ({
-    id: `local-${index}`,
-    studentId: `local-${index}`,
-    studentName: inferStudentNameFromFilename(entry.originalFile.name),
-    studentEmail: '',
-    state: 'LOCAL',
-    late: false,
-    hasSubmission: true,
-    source: 'local',
-    localFiles: getLocalSubmissionFiles(entry),
-  }));
+  const submissions = [];
+  try {
+    for (let index = 0; index < state.localSubmissionFiles.length; index++) {
+      const entry = state.localSubmissionFiles[index];
+      if (isPdfSubmission(entry)) {
+        showFloatingStatus(`Procesando entregas… PDF ${index + 1} de ${state.localSubmissionFiles.length}`);
+        submissions.push(...await splitPdfEntryIntoSubmissions(entry, index));
+      } else {
+        submissions.push({
+          id: `local-${index}`,
+          studentId: `local-${index}`,
+          studentName: inferStudentNameFromFilename(entry.originalFile.name),
+          studentEmail: '',
+          state: 'LOCAL',
+          late: false,
+          hasSubmission: true,
+          source: 'local',
+          localFiles: getLocalSubmissionFiles(entry),
+        });
+      }
+    }
+  } finally {
+    hideFloatingStatus();
+  }
 
   state.task = {
     source: 'local',
