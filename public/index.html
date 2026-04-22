@@ -435,19 +435,8 @@ textarea{resize:vertical;min-height:90px}
             </select>
             <button class="btn btn-primary" id="btn-load-selected-task" onclick="loadSelectedTask()">Cargar</button>
           </div>
-          <p class="text-muted mt-1">Elige primero el curso y después la tarea. Es la opción más cómoda para no copiar la URL.</p>
+          <p class="text-muted mt-1">Elige primero el curso y después la tarea.</p>
         </div>
-
-        <div class="divider"></div>
-
-        <label>URL de la tarea en Google Classroom</label>
-        <div class="input-row">
-          <input type="url" id="task-url" placeholder="https://classroom.google.com/c/XXXXX/a/YYYYY/details" />
-          <button class="btn btn-primary" id="btn-load-task" onclick="loadTask()">
-            Cargar
-          </button>
-        </div>
-        <p class="text-muted mt-1">La URL la encuentras en la barra del navegador al abrir la tarea en Classroom</p>
       </div>
 
       <div class="tab-panel" id="step2-panel-local">
@@ -671,6 +660,7 @@ textarea{resize:vertical;min-height:90px}
 
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script>
 // ================================================================
 //  STATE
@@ -2227,6 +2217,14 @@ async function startCorrection() {
         throw new Error(saved.error || `Error guardando la correccion: ${saveRes.status}`);
       }
 
+      let classicPdfFile = null;
+      let annotatedPdfFile = null;
+      try {
+        classicPdfFile = await generateClassicPdfReport(dirName, studentName, taskName, courseName, correction);
+      } catch (e) {
+        console.error('No se pudo generar PDF clásico:', e);
+      }
+
       let htmlTarget = saved.htmlFile;
       let annotatedLinks = [];
       let mainLinkLabel = 'Ver informe →';
@@ -2240,12 +2238,16 @@ async function startCorrection() {
           annotatedLinks.push({ label: 'Ver informe anotado →', href: annotatedHref });
         }
         annotatedLinks = annotatedLinks.concat(annotated?.extraLinks || []);
+        try {
+          annotatedPdfFile = await generateAnnotatedPdfReport(dirName, studentName, taskName, courseName, studentFiles, correction);
+        } catch (e) {
+          console.error('No se pudo generar PDF anotado:', e);
+        }
       }
       if (sub.source !== 'local') {
         const filesForClassroom = [];
-        if (saved.htmlFile && !String(saved.htmlFile).startsWith('blob:')) filesForClassroom.push(saved.htmlFile);
-        const annotatedServerFile = annotatedLinks.find((link) => String(link.href || '').startsWith('/correcciones/'));
-        if (annotatedServerFile) filesForClassroom.push(annotatedServerFile.href.slice(1));
+        if (classicPdfFile) filesForClassroom.push(classicPdfFile);
+        if (annotatedPdfFile) filesForClassroom.push(annotatedPdfFile);
         if (filesForClassroom.length) {
           state.classroomReports.push({ studentId: sub.studentId, studentName, files: filesForClassroom });
         }
@@ -2555,6 +2557,155 @@ function formatElapsedTime(ms) {
   return `${minutes} min ${seconds}s`;
 }
 
+async function blobToBase64(blob) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function saveBinaryReport(dirName, filename, mimeType, blob) {
+  const dataBase64 = await blobToBase64(blob);
+  const res = await fetch('/api/save-binary-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dirName, filename, mimeType, dataBase64 }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'No se pudo guardar el archivo binario');
+  return data.filePath;
+}
+
+function normalizePdfText(text) {
+  return String(text || '').replace(/\r/g, '').trim();
+}
+
+async function generateClassicPdfReport(dirName, studentName, taskName, courseName, correction) {
+  const jsPDFCtor = window.jspdf?.jsPDF;
+  if (!jsPDFCtor) return null;
+  const doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 44;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  const ensureSpace = (needed = 24) => {
+    if (y + needed <= pageHeight - margin) return;
+    doc.addPage();
+    y = margin;
+  };
+  const addParagraph = (text, size = 11, bold = false, gap = 14) => {
+    const clean = normalizePdfText(text);
+    if (!clean) return;
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(clean, contentWidth);
+    ensureSpace(lines.length * (size + 4));
+    doc.text(lines, margin, y);
+    y += lines.length * (size + 4) + gap;
+  };
+  const addList = (title, items, color = [30, 41, 59]) => {
+    if (!items?.length) return;
+    doc.setTextColor(...color);
+    addParagraph(title, 12, true, 8);
+    doc.setTextColor(51, 65, 85);
+    items.forEach((item) => addParagraph(`• ${item}`, 10, false, 6));
+    y += 4;
+  };
+
+  doc.setFillColor(30, 58, 138);
+  doc.roundedRect(margin, margin, contentWidth, 78, 10, 10, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text(taskName, margin + 18, margin + 26);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${courseName} · ${studentName}`, margin + 18, margin + 48);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text(`${correction?.nota ?? '—'}/10`, pageWidth - margin - 70, margin + 40);
+  y = margin + 102;
+  doc.setTextColor(30, 41, 59);
+  addParagraph('Evaluación general', 13, true, 8);
+  addParagraph(correction?.evaluacion_general || 'No disponible', 11, false, 10);
+  if (correction?.nota_justificacion) addParagraph(`Justificación: ${correction.nota_justificacion}`, 10, false, 12);
+  addList('Puntos fuertes', correction?.puntos_fuertes, [22, 101, 52]);
+  addList('Aspectos a mejorar', correction?.aspectos_mejora, [146, 64, 14]);
+  addList('Errores importantes', correction?.errores_graves, [153, 27, 27]);
+  addParagraph('Corrección detallada', 13, true, 8);
+  addParagraph(correction?.correccion_detallada || 'No disponible', 10, false, 12);
+  addParagraph('Consejos para mejorar', 13, true, 8);
+  addParagraph(correction?.feedforward || 'No disponible', 10, false, 8);
+
+  const blob = doc.output('blob');
+  return await saveBinaryReport(dirName, `${studentName}_informe`, 'application/pdf', blob);
+}
+
+async function generateAnnotatedPdfReport(dirName, studentName, taskName, courseName, localFiles, correction) {
+  const jsPDFCtor = window.jspdf?.jsPDF;
+  if (!jsPDFCtor) return null;
+  const pageImages = [];
+  for (const file of localFiles || []) pageImages.push(...await renderFileToPageImages(file));
+  if (!pageImages.length) return null;
+  const visual = Array.isArray(correction?.anotaciones_visuales?.pages) && correction.anotaciones_visuales.pages.length
+    ? correction.anotaciones_visuales.pages
+    : buildFallbackVisualAnnotations(pageImages, correction).pages;
+  if (!visual?.length) return null;
+
+  const doc = new jsPDFCtor({ unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  pageImages.forEach((page, idx) => {
+    if (idx > 0) doc.addPage();
+    const ann = visual.find((item) => Number(item.page_number) === Number(page.pageNumber));
+    const imgWidth = 330;
+    const imgHeight = (page.height / page.width) * imgWidth;
+    const x = 34;
+    const y = 46;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`${taskName} · Página ${page.pageNumber}`, x, 26);
+    doc.addImage(page.dataUrl || page.image.src, 'PNG', x, y, imgWidth, imgHeight);
+    doc.setDrawColor(37, 99, 235);
+    doc.setTextColor(30, 64, 175);
+    (ann?.annotations || []).filter((item) => item.text).forEach((item, commentIdx) => {
+      const lineY = y + (Math.max(4, Math.min(96, Number(item.y_percent || 0))) / 100) * imgHeight;
+      doc.setLineDashPattern([4, 3], 0);
+      doc.line(x, lineY, x + imgWidth, lineY);
+      doc.setLineDashPattern([], 0);
+      const labelX = x + imgWidth + 18;
+      const labelY = Math.max(64, Math.min(pageHeight - 120, lineY));
+      doc.setFillColor(239, 246, 255);
+      doc.roundedRect(labelX - 8, labelY - 14, 180, 54, 8, 8, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      const symbol = item.type === 'correct' ? '✓' : item.type === 'incorrect' ? '✗' : item.type === 'partial' ? '~' : '•';
+      const title = item.type === 'correct' ? 'Acierto' : item.type === 'incorrect' ? 'Corrección' : item.type === 'partial' ? 'Parcial' : 'Comentario';
+      const color = item.type === 'correct' ? [22, 163, 74] : item.type === 'incorrect' ? [220, 38, 38] : item.type === 'partial' ? [217, 119, 6] : [29, 78, 216];
+      doc.setTextColor(...color);
+      doc.text(symbol, labelX, labelY);
+      doc.text(title, labelX + 14, labelY);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(51, 65, 85);
+      const lines = doc.splitTextToSize(String(item.text || ''), 162).slice(0, 3);
+      doc.text(lines, labelX, labelY + 16);
+    });
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(29, 78, 216);
+    doc.text('Consejos para mejorar', x, Math.min(pageHeight - 70, y + imgHeight + 24));
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(51, 65, 85);
+    const ffLines = doc.splitTextToSize(normalizePdfText(correction?.feedforward || 'No disponible'), pageWidth - 80);
+    doc.text(ffLines.slice(0, 6), x, Math.min(pageHeight - 50, y + imgHeight + 42));
+  });
+  const blob = doc.output('blob');
+  return await saveBinaryReport(dirName, `${studentName}_informe_anotado`, 'application/pdf', blob);
+}
+
 function getRenderableFileMeta(file) {
   const rawName = String(file?.name || 'archivo')
   const lowerName = rawName.toLowerCase()
@@ -2637,6 +2788,36 @@ async function renderFileToPageImages(file) {
   return [];
 }
 
+function buildTextOnlyAnnotatedReport(dirName, studentName, taskName, courseName, correction, sourceLabel = 'Entrega') {
+  const nota = correction?.nota !== null && correction?.nota !== undefined ? Number(correction.nota).toFixed(1) : '—';
+  const htmlTemplate = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Corrección anotada: ${esc(studentName)}</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f1f5f9;color:#1e293b;margin:0;padding:1.25rem;line-height:1.5}
+.card{max-width:900px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:1.2rem 1.3rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+h1{margin:0 0 .3rem 0;font-size:1.35rem} .muted{color:#64748b}.grade{display:inline-block;margin:.8rem 0;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:.3rem .75rem;font-weight:800}
+.box{margin-top:1rem;padding:1rem;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff}.box h3{margin:0 0 .45rem 0;color:#1d4ed8}.box p{margin:0;white-space:pre-wrap}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>${esc(taskName)}</h1>
+    <div class="muted">${esc(courseName)} · ${esc(studentName)}</div>
+    <div class="grade">Nota: ${nota}/10</div>
+    <div class="box"><h3>Informe anotado simplificado</h3><p>No se pudo renderizar visualmente el archivo original de ${esc(sourceLabel)}. Se muestra una versión anotada basada en la corrección textual.</p></div>
+    <div class="box"><h3>Evaluación general</h3><p>${esc(correction?.evaluacion_general || 'No disponible')}</p></div>
+    <div class="box"><h3>Corrección detallada</h3><p>${esc(correction?.correccion_detallada || 'No disponible')}</p></div>
+    <div class="box"><h3>Consejos para mejorar</h3><p>${esc(correction?.feedforward || 'No disponible')}</p></div>
+  </div>
+</body>
+</html>`;
+  return { html: htmlTemplate, filename: `${studentName}_anotado` };
+}
+
 function drawRoundedRect(ctx, x, y, w, h, radius, fillStyle, strokeStyle = null, lineWidth = 1) {
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -2699,6 +2880,18 @@ async function generateAnnotatedArtifacts(dirName, studentName, taskName, course
   }
   if (!pageImages.length) {
     console.warn('Informe anotado no generado: sin páginas renderizables', localFiles)
+    const fallback = buildTextOnlyAnnotatedReport(dirName, studentName, taskName, courseName, correction, localFiles?.[0]?.name || 'la entrega');
+    try {
+      const saveRes = await fetch('/api/save-custom-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dirName, filename: fallback.filename, htmlContent: fallback.html }),
+      });
+      const saved = await saveRes.json().catch(() => ({}));
+      if (saveRes.ok && saved.htmlFile) return { htmlHref: saved.htmlFile, extraLinks: [] };
+    } catch (e) {
+      console.error('Fallback anotado simplificado también falló:', e)
+    }
     return null;
   }
   const resolvedVisual = Array.isArray(visual) && visual.length
@@ -2728,6 +2921,18 @@ async function generateAnnotatedArtifacts(dirName, studentName, taskName, course
   }
   if (!reportPages.length) {
     console.warn('Informe anotado no generado: las anotaciones no se pudieron asociar a páginas', resolvedVisual)
+    const fallback = buildTextOnlyAnnotatedReport(dirName, studentName, taskName, courseName, correction, pageImages?.[0]?.sourceName || 'la entrega');
+    try {
+      const saveRes = await fetch('/api/save-custom-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dirName, filename: fallback.filename, htmlContent: fallback.html }),
+      });
+      const saved = await saveRes.json().catch(() => ({}));
+      if (saveRes.ok && saved.htmlFile) return { htmlHref: saved.htmlFile, extraLinks: [] };
+    } catch (e) {
+      console.error('Fallback anotado simplificado también falló:', e)
+    }
     return null;
   }
 
@@ -2749,7 +2954,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .exam-frame{position:relative;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#fff;cursor:crosshair}
 .exam-frame img{display:block;width:100%;height:auto}
 .guide-line{position:absolute;left:0;right:0;height:0;border-top:2px dashed rgba(37,99,235,.45);pointer-events:none}.guide-dot{position:absolute;right:10px;top:-5px;width:10px;height:10px;border-radius:999px;background:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
-.comment-list{position:relative}.comment-card{position:absolute;left:0;right:0;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff;padding:.55rem .65rem}.comment-card summary{cursor:pointer;font-weight:700;color:#1d4ed8}.comment-card p{margin:.45rem 0 0 0;font-size:.9rem;color:#334155}.comment-editor{width:100%;min-height:96px;border:1px solid #bfdbfe;border-radius:10px;padding:.65rem .75rem;font:inherit;color:#334155;resize:vertical;background:#fff}.comment-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.55rem}.mini-btn{border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;border-radius:10px;padding:.42rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer}.mini-btn:hover{background:#eff6ff}.click-help{font-size:.8rem;color:#64748b;margin-top:.5rem}.comment-placeholder{position:absolute;left:0;right:0;top:0;border:1px dashed #dbeafe;border-radius:12px;background:#f8fbff;padding:.8rem;color:#64748b}.feedforward-box{margin-top:1rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:.9rem 1rem}.feedforward-box h3{margin:0 0 .4rem 0;color:#1d4ed8;font-size:.96rem}.feedforward-box p{margin:0;color:#334155;white-space:pre-wrap}
+.comment-list{position:relative}.comment-card{position:absolute;left:0;right:0;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff;padding:.55rem .65rem}.comment-card summary{cursor:pointer;font-weight:700;color:#1d4ed8}.sum-good{color:#15803d}.sum-bad{color:#dc2626}.sum-mid{color:#d97706}.sum-note{color:#2563eb}.comment-card p{margin:.45rem 0 0 0;font-size:.9rem;color:#334155}.comment-editor{width:100%;min-height:96px;border:1px solid #bfdbfe;border-radius:10px;padding:.65rem .75rem;font:inherit;color:#334155;resize:vertical;background:#fff}.comment-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.55rem}.mini-btn{border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;border-radius:10px;padding:.42rem .7rem;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer}.mini-btn:hover{background:#eff6ff}.click-help{font-size:.8rem;color:#64748b;margin-top:.5rem}.comment-placeholder{position:absolute;left:0;right:0;top:0;border:1px dashed #dbeafe;border-radius:12px;background:#f8fbff;padding:.8rem;color:#64748b}.feedforward-box{margin-top:1rem;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:.9rem 1rem}.feedforward-box h3{margin:0 0 .4rem 0;color:#1d4ed8;font-size:.96rem}.feedforward-box p{margin:0;color:#334155;white-space:pre-wrap}
 @media(max-width:840px){.page-grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -2774,7 +2979,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
           ${page.comments.length ? page.comments.map((comment, idx, arr) => {
             return `
             <details class="comment-card" data-page="${page.pageNumber}" data-y-percent="${Math.round(comment.yPercent)}">
-              <summary>${comment.type === 'correct' ? '✓ Acierto' : comment.type === 'incorrect' ? '✗ Corrección' : comment.type === 'partial' ? '~ Parcial' : '💬 Comentario'}</summary>
+              <summary>${comment.type === 'correct' ? '<span class="sum-good">✓</span> Acierto' : comment.type === 'incorrect' ? '<span class="sum-bad">✗</span> Corrección' : comment.type === 'partial' ? '<span class="sum-mid">~</span> Parcial' : '<span class="sum-note">💬</span> Comentario'}</summary>
               <p>${esc(comment.text)}</p>
               <div class="comment-actions">
                 <button class="mini-btn" type="button" onclick="editComment(this)">Editar</button>

@@ -1621,10 +1621,31 @@ app.post('/api/save-custom-report', express.json({ limit: '50mb' }), async (req,
   }
 });
 
+app.post('/api/save-binary-report', express.json({ limit: '50mb' }), async (req, res) => {
+  const { dirName, filename, mimeType, dataBase64 } = req.body;
+  if (!dirName || !filename || !mimeType || !dataBase64) {
+    return res.status(400).json({ error: 'Faltan parámetros' });
+  }
+  try {
+    const outputDir = path.join(__dirname, 'correcciones', dirName);
+    await fsp.mkdir(outputDir, { recursive: true });
+    const ext = mimeType === 'application/pdf' ? '.pdf' : '';
+    const safeFilename = `${sanitizeFilename(filename.replace(/\.[^.]+$/i, ''))}${ext}`;
+    const filePath = path.join(outputDir, safeFilename);
+    await fsp.writeFile(filePath, Buffer.from(dataBase64, 'base64'));
+    res.json({ filePath: `correcciones/${dirName}/${safeFilename}`, filename: safeFilename });
+  } catch (e) {
+    console.error('save-binary-report error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 async function uploadReportToDrive(localPath, reportName) {
   const drive = google.drive({ version: 'v3', auth: oauth2Client });
+  const lower = String(reportName || '').toLowerCase();
+  const mimeType = lower.endsWith('.pdf') ? 'application/pdf' : 'text/html';
   const fileMetadata = { name: reportName };
-  const media = { mimeType: 'text/html', body: fs.createReadStream(localPath) };
+  const media = { mimeType, body: fs.createReadStream(localPath) };
   const created = await drive.files.create({ requestBody: fileMetadata, media, fields: 'id,name,webViewLink' });
   return created.data;
 }
