@@ -1060,12 +1060,41 @@ function buildPrompt(taskName, courseName, instructions, numRef, numStudent) {
   "aspectos_mejora": ["<aspecto 1>", "<aspecto 2>", ...],
   "errores_graves": ["<error importante>", ...],
   "correccion_detallada": "<análisis detallado sección por sección o pregunta por pregunta>",
-  "feedforward": "<recomendaciones concretas y accionables para mejorar>"
+  "correccion_detallada_items": [
+    {
+      "titulo": "<actividad, pregunta o bloque>",
+      "estado": "correct|incorrect|partial|comment",
+      "respuesta": "<respuesta del alumno o resumen muy breve>",
+      "comentario": "<explicación exacta, concreta y pedagógica>",
+      "puntuacion": "<opcional: 1/2 o 0,5/1>"
+    }
+  ],
+  "nota_desglose": [
+    {
+      "actividad": "<actividad o criterio>",
+      "observaciones": "<resumen breve>",
+      "puntuacion": "<ej. 1,5 / 2>"
+    }
+  ],
+  "aspecto_principal_mejora": "<principal mejora que debe hacer el alumno>",
+  "feedforward": "<recomendaciones concretas y accionables para mejorar>",
+  "feedforward_pasos": ["<paso 1>", "<paso 2>", "<paso 3>"],
+  "mensaje_final": "<cierre breve, motivador y personalizado>"
 }
 
 REGLAS IMPORTANTES:
 - "nota" debe ser un número (ej: 7.5), no una cadena
 - Si el trabajo no puede evaluarse, "nota" debe ser null
+- Rellena SIEMPRE "correccion_detallada_items" con varias entradas concretas si el contenido lo permite
+- Rellena SIEMPRE "nota_desglose" con un pequeño desglose orientativo si hay varias actividades o criterios
+- Usa en "estado": "correct" para aciertos claros, "incorrect" para errores, "partial" para respuestas parcialmente correctas y "comment" para observaciones neutrales
+- Si el examen o tarea es de rellenar huecos, corrige CADA hueco por separado y crea una entrada distinta en "correccion_detallada_items" para cada uno, indicando si es correcto, incorrecto o parcialmente correcto
+- Si hay preguntas cortas, apartados, correspondencias, verdadero/falso o definiciones, intenta evaluar cada respuesta por separado, no hagas solo un comentario global
+- En "respuesta" cita literalmente la respuesta del alumno o resume ese hueco/pregunta de forma muy breve para que se entienda exactamente qué se está corrigiendo
+- En "comentario" explica por qué está bien o mal y, si procede, cuál sería la respuesta correcta
+- En "nota_desglose" incluye una fila por actividad, criterio o bloque relevante, con observaciones breves pero concretas
+- En "aspecto_principal_mejora" elige solo UN foco prioritario de mejora, el más importante para que el alumno avance
+- En "feedforward_pasos" da 2-4 pasos muy concretos, accionables y adaptados al tipo de error cometido
 - Si el material de referencia incluye una rúbrica, refleja en la corrección detallada la nota o valoración de cada criterio relevante
 - En "correccion_detallada" separa claramente las ideas por apartados, preguntas o criterios, usando saltos de línea
 - En "feedforward" separa los consejos en pasos concretos o viñetas, una idea por línea
@@ -1098,6 +1127,8 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
     if (!arr || !arr.length) return `<li class="${cls}">—</li>`;
     return arr.map((item) => `<li class="${cls}">${escapeHtml(item)}</li>`).join('');
   };
+  const detailedItems = Array.isArray(correction.correccion_detallada_items) ? correction.correccion_detallada_items : [];
+  const scoreRows = Array.isArray(correction.nota_desglose) ? correction.nota_desglose : [];
 
   const formatRichText = (value, cls) => {
     const text = String(value || '').trim();
@@ -1155,6 +1186,14 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
   .rich-list{margin:0 0 .55rem 0;padding-left:1.1rem;color:#334155}
   .rich-list:last-child{margin-bottom:0}
   .rich-list li{margin:.18rem 0;padding-left:.15rem}
+  .section-banner{border-radius:.7rem;padding:.55rem .8rem;font-size:.78rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-bottom:.7rem;color:#fff}
+  .banner-green{background:#15803d}.banner-red{background:#b91c1c}.banner-blue{background:#1d4ed8}.banner-amber{background:#b45309}
+  .detail-item{border:1px solid #e2e8f0;border-radius:.75rem;padding:.75rem .85rem;margin-bottom:.55rem;background:#fff}
+  .detail-head{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.35rem}
+  .detail-title{font-weight:800;color:#1f477e}.state-good{color:#15803d}.state-bad{color:#dc2626}.state-mid{color:#d97706}.state-note{color:#2563eb}.detail-score{font-size:.8rem;background:#eff6ff;color:#1d4ed8;padding:.12rem .45rem;border-radius:999px}
+  .detail-response{font-size:.88rem;color:#334155;margin:.2rem 0}.detail-comment{font-size:.88rem;color:#475569;font-style:italic}
+  .focus-box{background:#fff7ed;border:1px solid #fed7aa;border-left:5px solid #ea580c;border-radius:.75rem;padding:.9rem 1rem;color:#9a3412}
+  table.score-table{width:100%;border-collapse:separate;border-spacing:0 .45rem;font-size:.88rem} table.score-table th{background:#eff6ff;color:#1f477e;text-align:left;padding:.55rem .65rem} table.score-table td{background:#f8fafc;padding:.6rem .65rem;vertical-align:top;border-top:1px solid #dbeafe;border-bottom:1px solid #dbeafe} table.score-table td:first-child,table.score-table th:first-child{border-left:1px solid #dbeafe;border-radius:.6rem 0 0 .6rem} table.score-table td:last-child,table.score-table th:last-child{border-right:1px solid #dbeafe;border-radius:0 .6rem .6rem 0} .score-pill{display:inline-block;background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:.18rem .5rem;font-weight:700;font-size:.8rem}
   .tag{display:inline-block;font-size:.75rem;font-weight:600;padding:.2rem .6rem;border-radius:2rem;margin:.15rem}
   ul.feedback-list{list-style:none}
   ul.feedback-list li{padding:.48rem .75rem;margin-bottom:.28rem;border-radius:.5rem;font-size:.86rem;position:relative;padding-left:1.55rem}
@@ -1225,33 +1264,51 @@ function generateCorrectionHTML(studentName, taskName, courseName, correction, d
   </div>
 
   <div class="card">
-    <div class="card-title" style="color:#16a34a">✅ Puntos fuertes</div>
+    <div class="section-banner banner-green">Puntos fuertes</div>
     <ul class="feedback-list">${listHtml(correction.puntos_fuertes, 'li-green')}</ul>
   </div>
 
   <div class="card">
-    <div class="card-title" style="color:#d97706">⚠️ Aspectos a mejorar</div>
+    <div class="section-banner banner-amber">Aspectos a mejorar</div>
     <ul class="feedback-list">${listHtml(correction.aspectos_mejora, 'li-amber')}</ul>
   </div>
 
   ${
     correction.errores_graves && correction.errores_graves.length
       ? `<div class="card">
-    <div class="card-title" style="color:#dc2626">❌ Errores importantes</div>
+    <div class="section-banner banner-red">Errores importantes</div>
     <ul class="feedback-list">${listHtml(correction.errores_graves, 'li-red')}</ul>
   </div>`
       : ''
   }
 
   <div class="card">
-    <div class="card-title" style="color:#1e293b">🔍 Corrección detallada</div>
+    <div class="section-banner banner-blue">Corrección detallada</div>
+    ${detailedItems.length ? `<div>${detailedItems.map((item) => {
+      const stateClass = item.estado === 'correct' ? 'state-good' : item.estado === 'incorrect' ? 'state-bad' : item.estado === 'partial' ? 'state-mid' : 'state-note';
+      const stateLabel = item.estado === 'correct' ? '✓' : item.estado === 'incorrect' ? '✗' : item.estado === 'partial' ? '~' : '💬';
+      return `<div class="detail-item"><div class="detail-head"><span class="${stateClass}"><strong>${stateLabel}</strong></span><span class="detail-title">${escapeHtml(item.titulo || 'Observación')}</span>${item.puntuacion ? `<span class="detail-score">${escapeHtml(item.puntuacion)}</span>` : ''}</div>${item.respuesta ? `<div class="detail-response">${escapeHtml(item.respuesta)}</div>` : ''}${item.comentario ? `<div class="detail-comment">${escapeHtml(item.comentario)}</div>` : ''}</div>`;
+    }).join('')}</div>` : ''}
     <div class="bg-gray">${formatRichText(correction.correccion_detallada, 'rich-gray')}</div>
   </div>
 
+  ${scoreRows.length ? `<div class="card">
+    <div class="section-banner banner-blue">Nota orientativa por bloques</div>
+    <table class="score-table"><thead><tr><th>Actividad / criterio</th><th>Observaciones</th><th>Puntuación</th></tr></thead><tbody>${scoreRows.map((row) => `<tr><td>${escapeHtml(row.actividad || '')}</td><td>${escapeHtml(row.observaciones || '')}</td><td><span class="score-pill">${escapeHtml(row.puntuacion || '')}</span></td></tr>`).join('')}</tbody></table>
+  </div>` : ''}
+
+  ${correction.aspecto_principal_mejora ? `<div class="card">
+    <div class="section-banner banner-red">Aspecto principal a mejorar</div>
+    <div class="focus-box">${escapeHtml(correction.aspecto_principal_mejora)}</div>
+  </div>` : ''}
+
   <div class="card">
-    <div class="card-title" style="color:#2563eb">🚀 Feedforward &mdash; Cómo mejorar</div>
+    <div class="section-banner banner-blue">Feedforward · Cómo mejorar</div>
     <div class="bg-blue">${formatRichText(correction.feedforward, 'rich-blue')}</div>
+    ${Array.isArray(correction.feedforward_pasos) && correction.feedforward_pasos.length ? `<ul class="feedback-list" style="margin-top:.6rem">${listHtml(correction.feedforward_pasos, 'li-green')}</ul>` : ''}
   </div>
+
+  ${correction.mensaje_final ? `<div class="card"><div class="section-banner banner-blue">Mensaje final</div><div class="bg-gray">${escapeHtml(correction.mensaje_final)}</div></div>` : ''}
 
   <div class="card no-print">
     <button class="print-btn" onclick="window.print()">🖨️ Imprimir o guardar como PDF</button>

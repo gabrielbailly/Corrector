@@ -2129,7 +2129,26 @@ function buildPromptClient(taskName, courseName, instructions, numRef, numStuden
   "aspectos_mejora": ["<aspecto 1>", "<aspecto 2>", ...],
   "errores_graves": ["<error importante>", ...],
   "correccion_detallada": "<análisis detallado sección por sección o pregunta por pregunta>",
+  "correccion_detallada_items": [
+    {
+      "titulo": "<actividad, pregunta o bloque>",
+      "estado": "correct|incorrect|partial|comment",
+      "respuesta": "<respuesta del alumno o resumen muy breve>",
+      "comentario": "<explicación exacta, concreta y pedagógica>",
+      "puntuacion": "<opcional: 1/2 o 0,5/1>"
+    }
+  ],
+  "nota_desglose": [
+    {
+      "actividad": "<actividad o criterio>",
+      "observaciones": "<resumen breve>",
+      "puntuacion": "<ej. 1,5 / 2>"
+    }
+  ],
+  "aspecto_principal_mejora": "<principal mejora que debe hacer el alumno>",
   "feedforward": "<recomendaciones concretas y accionables para mejorar>",
+  "feedforward_pasos": ["<paso 1>", "<paso 2>", "<paso 3>"],
+  "mensaje_final": "<cierre breve, motivador y personalizado>",
   "anotaciones_visuales": {
     "pages": [
       {
@@ -2150,6 +2169,16 @@ REGLAS IMPORTANTES:
 - "nota" debe ser un número (ej: 7.5), no una cadena
 - Si el trabajo no puede evaluarse, "nota" debe ser null
 - Ignora y no reproduzcas datos personales del alumno si aparecen en la entrega
+- Rellena SIEMPRE "correccion_detallada_items" con varias entradas concretas si el contenido lo permite
+- Rellena SIEMPRE "nota_desglose" con un pequeño desglose orientativo si hay varias actividades o criterios
+- Usa en "estado": "correct" para aciertos claros, "incorrect" para errores, "partial" para respuestas parcialmente correctas y "comment" para observaciones neutrales
+- Si el examen o tarea es de rellenar huecos, corrige CADA hueco por separado y crea una entrada distinta en "correccion_detallada_items" para cada uno, indicando si es correcto, incorrecto o parcialmente correcto
+- Si hay preguntas cortas, apartados, correspondencias, verdadero/falso o definiciones, intenta evaluar cada respuesta por separado, no hagas solo un comentario global
+- En "respuesta" cita literalmente la respuesta del alumno o resume ese hueco/pregunta de forma muy breve para que se entienda exactamente qué se está corrigiendo
+- En "comentario" explica por qué está bien o mal y, si procede, cuál sería la respuesta correcta
+- En "nota_desglose" incluye una fila por actividad, criterio o bloque relevante, con observaciones breves pero concretas
+- En "aspecto_principal_mejora" elige solo UN foco prioritario de mejora, el más importante para que el alumno avance
+- En "feedforward_pasos" da 2-4 pasos muy concretos, accionables y adaptados al tipo de error cometido
 - Si el material de referencia incluye una rúbrica, refleja en la corrección detallada la nota o valoración de cada criterio relevante
 - En "correccion_detallada" separa claramente las ideas por apartados, preguntas o criterios, usando saltos de línea
 - En "feedforward" separa los consejos en pasos concretos o viñetas, una idea por línea
