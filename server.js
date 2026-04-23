@@ -1050,6 +1050,27 @@ function buildPrompt(taskName, courseName, instructions, numRef, numStudent) {
     p += `INSTRUCCIONES ESPECÍFICAS DEL PROFESOR:\n${instructions.trim()}\n\n`;
   }
 
+  p += `GUÍA DE LECTURA Y CORRECCIÓN DE ESCRITURA MANUSCRITA:
+- Usa el contexto de la asignatura para desambiguar palabras dudosas. Si estás en Física y Química y algo parece "acido", léelo como "ácido" si encaja.
+- Lee en bloques y frases completas, no solo letra a letra.
+- En fórmulas y números, prioriza patrones reales de la materia (fórmulas químicas, subíndices, signos, etc.).
+- Si algo no se puede leer con confianza razonable, indícalo como [ilegible]. No inventes.
+- Distingue entre una respuesta en blanco y una respuesta [ilegible].
+- Evita errores frecuentes de lectura: u/v, a/o, 1/l, subíndices o superíndices manuscritos, signos como =.
+
+GUÍA DE CORRECCIÓN POR PREGUNTA:
+- Para cada pregunta, apartado o hueco relevante: transcribe brevemente lo que ha escrito el alumno, evalúa si está correcto, parcialmente correcto o incorrecto, explica el error concreto si lo hay, da la respuesta correcta como referencia y asigna una puntuación orientativa si se puede inferir.
+- Si el examen es de rellenar huecos, corrige cada hueco por separado.
+- Si el razonamiento es correcto pero hay un error de cálculo o precisión, reconócelo.
+- Si la respuesta final es correcta pero el proceso es incorrecto o insuficiente, señálalo.
+
+GUÍA DE FEEDBACK FORMATIVO:
+- En puntos fuertes, menciona 1 o 2 fortalezas específicas y reales del examen, no elogios genéricos.
+- En aspecto_principal_mejora, elige un único foco prioritario y apóyalo en un ejemplo concreto del examen.
+- En feedforward_pasos, da entre 2 y 4 acciones concretas, realizables y útiles para la próxima vez.
+- En nota_desglose, justifica brevemente el reparto por bloques o preguntas si aplica.
+- Habla al alumno de tú, con tono profesional cercano, directo y respetuoso. Evita frases vacías o demasiado genéricas.
+
   p += `Analiza el trabajo minuciosamente y responde ÚNICAMENTE con un objeto JSON con esta estructura exacta:
 
 {

@@ -1445,6 +1445,52 @@ function hideFloatingStatus() {
   document.getElementById('floating-status')?.classList.add('hidden');
 }
 
+let floatingStatusTimer = null;
+
+function startFloatingCountdown(baseText, totalSeconds) {
+  clearInterval(floatingStatusTimer);
+  let remaining = Math.max(0, Math.round(totalSeconds));
+  const tick = () => {
+    const mins = Math.floor(remaining / 60);
+    const secs = remaining % 60;
+    const eta = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    showFloatingStatus(`${baseText} · tiempo aprox. restante ${eta}`);
+    if (remaining <= 0) clearInterval(floatingStatusTimer);
+    remaining--;
+  };
+  tick();
+  floatingStatusTimer = setInterval(tick, 1000);
+}
+
+function stopFloatingCountdown() {
+  clearInterval(floatingStatusTimer);
+  floatingStatusTimer = null;
+}
+
+async function estimateLocalProcessingSeconds(entries) {
+  let total = 0;
+  for (const entry of entries || []) {
+    if (isPdfSubmission(entry)) {
+      try {
+        const bytes = await entry.originalFile.arrayBuffer();
+        if (window.pdfjsLib) {
+          const pdfjs = window.pdfjsLib;
+          pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+          const pdfDoc = await pdfjs.getDocument({ data: bytes }).promise;
+          total += Math.max(8, pdfDoc.numPages * 4);
+        } else {
+          total += 10;
+        }
+      } catch (e) {
+        total += 10;
+      }
+    } else {
+      total += 2;
+    }
+  }
+  return total;
+}
+
 function getAnonymizerCanvas() {
   return document.getElementById('anonymizer-canvas');
 }
@@ -1802,7 +1848,8 @@ async function loadLocalTask() {
   let taskName = document.getElementById('local-task-name').value.trim();
   if (!state.localSubmissionFiles.length) return alert('Sube al menos una entrega.');
 
-  showFloatingStatus('Procesando entregas…');
+  const estimatedSeconds = await estimateLocalProcessingSeconds(state.localSubmissionFiles);
+  startFloatingCountdown('Procesando entregas…', estimatedSeconds);
 
   if (!courseName || !taskName) {
     const inferred = await inferLocalContextFromFiles(state.localSubmissionFiles);
@@ -1834,6 +1881,7 @@ async function loadLocalTask() {
       }
     }
   } finally {
+    stopFloatingCountdown();
     hideFloatingStatus();
   }
 
@@ -2119,6 +2167,26 @@ function buildPromptClient(taskName, courseName, instructions, numRef, numStuden
   if (options.includeVisualAnnotations) {
     p += `Además, como la entrega es visual, DEBES incluir anotaciones visuales aproximadas por página para superponer sobre el examen. Usa porcentajes verticales y comentarios breves de profesor. No omitas el bloque "anotaciones_visuales".\n\n`;
   }
+  p += `GUÍA DE LECTURA Y CORRECCIÓN DE ESCRITURA MANUSCRITA:
+- Usa el contexto de la asignatura para desambiguar palabras dudosas. Si estás en Física y Química y algo parece "acido", léelo como "ácido" si encaja.
+- Lee en bloques y frases completas, no solo letra a letra.
+- En fórmulas y números, prioriza patrones reales de la materia (fórmulas químicas, subíndices, signos, etc.).
+- Si algo no se puede leer con confianza razonable, indícalo como [ilegible]. No inventes.
+- Distingue entre una respuesta en blanco y una respuesta [ilegible].
+- Evita errores frecuentes de lectura: u/v, a/o, 1/l, subíndices o superíndices manuscritos, signos como =.
+
+GUÍA DE CORRECCIÓN POR PREGUNTA:
+- Para cada pregunta, apartado o hueco relevante: transcribe brevemente lo que ha escrito el alumno, evalúa si está correcto, parcialmente correcto o incorrecto, explica el error concreto si lo hay, da la respuesta correcta como referencia y asigna una puntuación orientativa si se puede inferir.
+- Si el examen es de rellenar huecos, corrige cada hueco por separado.
+- Si el razonamiento es correcto pero hay un error de cálculo o precisión, reconócelo.
+- Si la respuesta final es correcta pero el proceso es incorrecto o insuficiente, señálalo.
+
+GUÍA DE FEEDBACK FORMATIVO:
+- En puntos fuertes, menciona 1 o 2 fortalezas específicas y reales del examen, no elogios genéricos.
+- En aspecto_principal_mejora, elige un único foco prioritario y apóyalo en un ejemplo concreto del examen.
+- En feedforward_pasos, da entre 2 y 4 acciones concretas, realizables y útiles para la próxima vez.
+- En nota_desglose, justifica brevemente el reparto por bloques o preguntas si aplica.
+- Habla al alumno de tú, con tono profesional cercano, directo y respetuoso. Evita frases vacías o demasiado genéricas.
   p += `Analiza el trabajo minuciosamente y responde ÚNICAMENTE con un objeto JSON con esta estructura exacta:
 
 {
