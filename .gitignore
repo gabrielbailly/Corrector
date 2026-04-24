@@ -16,3 +16,7 @@ correcciones/
 *.log
 .env
 .claude/
+
+# Archivos locales de trabajo
+*.docx
+corregir-examen-skill/
