@@ -47,6 +47,9 @@ function getGroqKey() {
 function getGeminiKey() {
   return process.env.GEMINI_API_KEY || appConfig.geminiApiKey || '';
 }
+function getClaudeKey() {
+  return process.env.CLAUDE_API_KEY || appConfig.claudeApiKey || '';
+}
 function getProvider() {
   if (appConfig.aiProvider) return appConfig.aiProvider;
   if (process.env.AI_PROVIDER) return process.env.AI_PROVIDER;
@@ -57,6 +60,11 @@ function getProvider() {
 const GROQ_MODEL_DEFAULT = 'meta-llama/llama-4-scout-17b-16e-instruct';
 function getGroqModel() {
   return appConfig.groqModel || GROQ_MODEL_DEFAULT;
+}
+// Claude: modelo por defecto
+const CLAUDE_MODEL_DEFAULT = 'claude-sonnet-4-5';
+function getClaudeModel() {
+  return appConfig.claudeModel || CLAUDE_MODEL_DEFAULT;
 }
 function getCurrentUserKey() {
   const email = String(oauth2Client.credentials?.email || '').trim().toLowerCase();
@@ -461,22 +469,28 @@ function anonymizeStudentFilename(name, index) {
 app.get('/api/config', (req, res) => {
   const groqKey    = getGroqKey();
   const geminiKey  = getGeminiKey();
+  const claudeKey  = getClaudeKey();
   res.json({
-    provider:        getProvider(),
-    hasGroqKey:      !!groqKey,
-    groqKeyPreview:  groqKey   ? `${groqKey.slice(0,6)}…${groqKey.slice(-4)}`   : '',
-    hasGeminiKey:    !!geminiKey,
-    geminiKeyPreview:geminiKey ? `${geminiKey.slice(0,6)}…${geminiKey.slice(-4)}` : '',
-    groqModel:       getGroqModel(),
+    provider:         getProvider(),
+    hasGroqKey:       !!groqKey,
+    groqKeyPreview:   groqKey    ? `${groqKey.slice(0,6)}…${groqKey.slice(-4)}`    : '',
+    hasGeminiKey:     !!geminiKey,
+    geminiKeyPreview: geminiKey  ? `${geminiKey.slice(0,6)}…${geminiKey.slice(-4)}` : '',
+    hasClaudeKey:     !!claudeKey,
+    claudeKeyPreview: claudeKey  ? `${claudeKey.slice(0,6)}…${claudeKey.slice(-4)}` : '',
+    groqModel:        getGroqModel(),
+    claudeModel:      getClaudeModel(),
   });
 });
 
 app.post('/api/config', express.json(), (req, res) => {
-  const { groqApiKey, geminiApiKey, aiProvider, groqModel } = req.body;
+  const { groqApiKey, geminiApiKey, claudeApiKey, aiProvider, groqModel, claudeModel } = req.body;
   if (groqApiKey   !== undefined) appConfig.groqApiKey   = groqApiKey.trim();
   if (geminiApiKey !== undefined) appConfig.geminiApiKey = geminiApiKey.trim();
+  if (claudeApiKey !== undefined) appConfig.claudeApiKey = claudeApiKey.trim();
   if (aiProvider   !== undefined) appConfig.aiProvider   = aiProvider;
   if (groqModel    !== undefined) appConfig.groqModel    = groqModel.trim();
+  if (claudeModel  !== undefined) appConfig.claudeModel  = claudeModel.trim();
   saveConfig();
   res.json({ success: true });
 });
@@ -535,11 +549,15 @@ app.post('/api/instruction-templates/delete', express.json({ limit: '64kb' }), a
 
 app.get('/api/ai-config', (req, res) => {
   const provider = getProvider();
-  const key = provider === 'groq' ? getGroqKey() : getGeminiKey();
+  let key;
+  if (provider === 'groq') key = getGroqKey();
+  else if (provider === 'claude') key = getClaudeKey();
+  else key = getGeminiKey();
   res.json({
     provider,
     key,          // the actual API key — acceptable for personal teacher tool
     groqModel: getGroqModel(),
+    claudeModel: getClaudeModel(),
   });
 });
 
@@ -1069,8 +1087,7 @@ GUÍA DE FEEDBACK FORMATIVO:
 - En aspecto_principal_mejora, elige un único foco prioritario y apóyalo en un ejemplo concreto del examen.
 - En feedforward_pasos, da entre 2 y 4 acciones concretas, realizables y útiles para la próxima vez.
 - En nota_desglose, justifica brevemente el reparto por bloques o preguntas si aplica.
-- Habla al alumno de tú, con tono profesional cercano, directo y respetuoso. Evita frases vacías o demasiado genéricas.
-
+- Habla al alumno de tú, con tono profesional cercano, directo y respetuoso. Evita frases vacías o demasiado genéricas.\n\n`;
   p += `Analiza el trabajo minuciosamente y responde ÚNICAMENTE con un objeto JSON con esta estructura exacta:
 
 {
