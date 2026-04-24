@@ -12,6 +12,7 @@ let pdfParse;
 try { pdfParse = require('pdf-parse'); } catch (e) {}
 let sharp;
 try { sharp = require('sharp'); } catch (e) { console.warn('sharp no disponible — imágenes sin comprimir'); }
+const { marked } = require('marked');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -338,6 +339,42 @@ app.use(express.static(path.join(__dirname, 'public')));
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024, files: 10 },
+});
+
+// ── README page ──────────────────────────────────────────────
+app.get('/readme', async (req, res) => {
+  try {
+    const md = await fsp.readFile(path.join(__dirname, 'README.md'), 'utf8');
+    const body = marked(md);
+    res.send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ayuda — Corrector IA</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 820px; margin: 0 auto; padding: 2rem 1.5rem 4rem; color: #1e293b; line-height: 1.7; }
+    h1 { color: #1e3a8a; border-bottom: 2px solid #3b82f6; padding-bottom: .4rem; }
+    h2 { color: #1d4ed8; margin-top: 2rem; }
+    h3 { color: #2563eb; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { border: 1px solid #cbd5e1; padding: .5rem .75rem; text-align: left; }
+    th { background: #eff6ff; color: #1e3a8a; }
+    code { background: #f1f5f9; padding: .15rem .4rem; border-radius: 4px; font-size: .9em; }
+    pre { background: #f1f5f9; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    pre code { background: none; padding: 0; }
+    a.back { display: inline-block; margin-bottom: 1.5rem; color: #2563eb; text-decoration: none; font-weight: 500; }
+    a.back:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <a class="back" href="/">← Volver a la app</a>
+  ${body}
+</body>
+</html>`);
+  } catch (e) {
+    res.status(500).send('No se pudo cargar el README.');
+  }
 });
 
 // ============================================================
